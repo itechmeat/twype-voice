@@ -1,0 +1,14 @@
+:80 {
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy api:8000
+	}
+
+	handle_path /livekit-signaling/* {
+		reverse_proxy livekit:7880
+	}
+
+	handle {
+		reverse_proxy web:5173
+	}
+}

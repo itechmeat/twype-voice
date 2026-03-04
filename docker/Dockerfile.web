@@ -1,0 +1,32 @@
+FROM oven/bun:slim AS base
+
+WORKDIR /app
+
+# --- dev target: volume-mount, vite dev server ---
+FROM base AS dev
+
+COPY apps/web/package.json apps/web/bun.lock* ./
+RUN bun install --frozen-lockfile 2>/dev/null || bun install
+
+EXPOSE 5173
+
+CMD ["bunx", "vite", "--host"]
+
+# --- build stage ---
+FROM base AS build
+
+COPY apps/web/package.json apps/web/bun.lock* ./
+RUN bun install --frozen-lockfile 2>/dev/null || bun install
+
+COPY apps/web/tsconfig.json apps/web/tsconfig.app.json apps/web/vite.config.ts apps/web/index.html ./
+COPY apps/web/src ./src
+RUN bunx vite build
+
+# --- prod target: serve static with nginx (non-root) ---
+FROM nginxinc/nginx-unprivileged:alpine AS prod
+
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 8080
+
+CMD ["nginx", "-g", "daemon off;"]
