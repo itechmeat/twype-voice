@@ -1,7 +1,7 @@
 # Environment
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -19,13 +19,10 @@ htmlcov/
 
 # Node.js
 node_modules/
-bun.lock
 
 # Vite / Frontend build
 apps/web/dist/
 
-# uv
-uv.lock
 
 # IDE
 .idea/

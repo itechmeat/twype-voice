@@ -22,6 +22,13 @@ Twype — interactive AI agent specializing in expert topics (medicine, psycholo
 
 All doc edits go through the `tech-writer` agent — never edit documentation files inline. Exceptions: the researcher creates explorations, and the architect owns decision substance.
 
+## Skills & Docs Attribution
+
+Every final report MUST include at the end:
+
+- `Skills used: <list>` — if any skills were consulted
+- `Docs used: <list>` — if any external documentation was fetched, on the new line of the report
+
 ## Delegation
 
 When delegating to agents, pass raw intent — what needs to happen and why. Don't specify files, formats, or structure. Don't enumerate what to keep, remove, or add — describe the goal and constraints, let the agent decide. Preserve the user's original words and scope. Each agent owns its domain and knows its own guidelines. Micromanaging duplicates their built-in knowledge and risks contradicting it.

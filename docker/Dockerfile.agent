@@ -4,7 +4,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
+RUN groupadd -r app && useradd -r -g app -d /app app
 WORKDIR /app
+RUN chown app:app /app
 
 # --- dev target: volume-mount sources, auto-reload ---
 FROM base AS dev
@@ -32,4 +34,5 @@ RUN uv sync --frozen --package twype-agent
 
 COPY apps/agent/src ./src
 
+USER app
 CMD ["uv", "run", "--package", "twype-agent", "python", "src/main.py", "start"]
