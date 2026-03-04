@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 
 from fastapi import Depends, HTTPException, status
@@ -37,7 +38,14 @@ async def get_current_user(
             detail="Invalid token type",
         )
 
-    user_id = payload.get("sub")
+    try:
+        user_id = uuid.UUID(str(payload["sub"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        ) from exc
+
     result = await session.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 

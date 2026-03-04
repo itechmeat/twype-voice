@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -28,12 +29,13 @@ from src.schemas.auth import TokenResponse
 VERIFICATION_CODE_TTL_MINUTES = 10
 
 
-def _hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+async def _hash_password(password: str) -> str:
+    hashed = await asyncio.to_thread(bcrypt.hashpw, password.encode(), bcrypt.gensalt())
+    return hashed.decode()
 
 
-def _verify_password(password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(password.encode(), password_hash.encode())
+async def _verify_password(password: str, password_hash: str) -> bool:
+    return await asyncio.to_thread(bcrypt.checkpw, password.encode(), password_hash.encode())
 
 
 def _generate_code() -> str:
@@ -66,7 +68,7 @@ async def _get_user_by_id(user_id: uuid.UUID, session: AsyncSession) -> User:
 async def register_user(email: str, password: str, session: AsyncSession) -> None:
     user = User(
         email=email,
-        password_hash=_hash_password(password),
+        password_hash=await _hash_password(password),
         verification_code=_generate_code(),
         verification_expires_at=datetime.now(UTC)
         + timedelta(minutes=VERIFICATION_CODE_TTL_MINUTES),
@@ -107,7 +109,7 @@ async def login_user(email: str, password: str, session: AsyncSession) -> TokenR
     except UserNotFoundError as exc:
         raise InvalidCredentialsError from exc
 
-    if not _verify_password(password, user.password_hash):
+    if not await _verify_password(password, user.password_hash):
         raise InvalidCredentialsError
 
     if not user.is_verified:
