@@ -1,73 +1,73 @@
-# Голосовой AI-агент: описание продукта
+# Voice AI Agent: Product Description
 
-**Версия:** 2.0 — MVP
-**Дата:** март 2026
+**Version:** 2.0 — MVP
+**Date:** March 2026
 
-> Описание идеи, ключевых принципов и концепций продукта. Техническая архитектура — в [architecture.md](architecture.md), спецификации стека — в [specs.md](specs.md).
-
----
-
-## 1. Идея продукта
-
-### Что это
-
-Интерактивный AI-агент, специализирующийся на конкретной экспертной теме — медицине, психологии, нутрициологии или любой другой области. Агент владеет знаниями конкретного специалиста, загруженными из книг, статей, подкастов и прочих материалов, и ведёт с пользователем осмысленный диалог — преимущественно голосом, но также и текстом.
-
-### Как пользователь взаимодействует с агентом
-
-Пользователь открывает PWA-приложение в браузере. Перед ним — интерфейс, совмещающий голосовой и текстовый чат. В рамках одной сессии пользователь свободно переключается между режимами: может начать разговор голосом, затем перейти в текст, и обратно. Контекст беседы при этом полностью сохраняется — агент помнит всё, что было сказано в обоих режимах. Транскрипты голосовых реплик отображаются в текстовом чате, формируя единую, непрерывную историю диалога.
-
-### Двухслойная подача ответа
-
-Агент формирует ответ в двух форматах одновременно:
-
-**Голосом** — краткий, разговорный ответ из 2–5 фраз. Вопросы-уточнения, ключевые тезисы, следующий шаг. Голосовой ответ оптимизирован под устное восприятие: без списков, ссылок и длинных перечислений.
-
-**В текстовом чате** — те же тезисы в структурированном виде. Каждый тезис сопровождается иконкой-индикатором источника (книга, видео, пост, подкаст). По клику на иконку открывается попап с детальной информацией обо всех источниках, на которые опирается данный тезис: автор, название, конкретный раздел/глава, страница или таймкод, прямая ссылка на материал (при наличии). Один тезис может ссылаться на несколько источников, если LLM синтезировал ответ из нескольких фрагментов базы знаний.
-
-Такой подход усиливает доверие к агенту и отличает продукт от обычного голосового бота — пользователь получает не только ответ, но и проверяемую доказательную базу с точностью до конкретного фрагмента источника.
-
-### Эмоциональная адаптация
-
-Агент адаптирует стиль общения к эмоциональному состоянию пользователя. Эмоциональная оценка основана на двумерной модели Circumplex (valence — позитивность/негативность, arousal — степень возбуждения). Это позволяет различать принципиально разные состояния: паническую атаку (негатив + высокое возбуждение) от апатии (негатив + низкое возбуждение) — и адаптировать тон, степень эмпатии и характер рекомендаций соответственно.
-
-### Проактивное поведение
-
-Агент не ограничивается реактивными ответами. При затянувшейся паузе после своего ответа агент может мягко инициировать продолжение диалога: задать уточняющий вопрос, предложить развить тему или спросить, нужно ли время на обдумывание. Это делает взаимодействие более естественным и приближенным к живому разговору со специалистом.
-
-### Кризисный протокол
-
-При обнаружении тревожных сигналов (упоминание суицидальных мыслей, острого кризиса, опасных симптомов) агент переключается на фиксированный протокол ответа: проявляет эмпатию, не обесценивает состояние, рекомендует обратиться за профессиональной помощью и предоставляет контактные данные служб поддержки. Контакты служб определяются динамически по языку/локали пользователя и хранятся в БД, а не хардкодятся в промптах или коде. Агент не ставит диагнозы, не назначает лечение и не подменяет врача.
-
-### Границы MVP
-
-- Один агент с одной экспертной темой
-- До 30 одновременных пользовательских сессий
-- Каждый пользователь ведёт независимую беседу с агентом
-- За рамками MVP: мульти-агентная маршрутизация, SIP-телефония, горизонтальное масштабирование на несколько серверов
-
-### Языковая поддержка
-
-На старте агент поддерживает английский и русский языки. Архитектура принципиально не ограничивает набор языков — добавление нового языка зависит исключительно от поддержки этого языка используемыми STT, TTS и LLM-провайдерами. В системе нет хардкода языков: ни в pipeline, ни в промптах, ни в конфигурации.
+> Description of the idea, key principles, and product concepts. Technical architecture — in [architecture.md](architecture.md), stack specifications — in [specs.md](specs.md).
 
 ---
 
-## 2. Ключевые принципы
+## 1. Product Idea
 
-### Провайдер-агностичность
+### What It Is
 
-Центральный принцип архитектуры — **максимальная простота замены и добавления провайдеров** для трёх ключевых компонентов: распознавания речи (STT), языковой модели (LLM) и синтеза речи (TTS).
+An interactive AI agent specializing in a specific expert topic — medicine, psychology, nutrition, or any other domain. The agent possesses the knowledge of a specific specialist, loaded from books, articles, podcasts, and other materials, and conducts a meaningful dialogue with the user — primarily by voice, but also by text.
 
-Каждый компонент взаимодействует с системой через стандартизированный интерфейс. Бизнес-логика агента не привязана к конкретному провайдеру. Замена провайдера — изменение конфигурации, как правило без изменений кода.
+### How the User Interacts with the Agent
 
-**Практическая оговорка.** Провайдеры различаются в деталях: STT — форматами partial/final, пунктуацией; TTS — управлением эмоцией, чанкингом аудио; LLM — длиной ответа, safety-политиками. Поэтому для MVP зафиксирован «золотой профиль» провайдеров (Deepgram + Gemini Flash-Lite + Inworld), под который тестируется UX. Смена провайдера — поддерживаемый сценарий, но требующий проверки UX. Практическое руководство по замене — в [architecture.md](architecture.md).
+The user opens a PWA application in the browser. They see an interface combining voice and text chat. Within a single session, the user freely switches between modes: they can start a conversation by voice, then switch to text, and back. The conversation context is fully preserved — the agent remembers everything said in both modes. Voice message transcripts are displayed in the text chat, forming a single, continuous dialogue history.
+
+### Two-Layer Response Delivery
+
+The agent generates a response in two formats simultaneously:
+
+**By voice** — a brief, conversational answer of 2–5 phrases. Clarifying questions, key points, next steps. The voice response is optimized for auditory perception: no lists, links, or lengthy enumerations.
+
+**In the text chat** — the same points in a structured format. Each point is accompanied by a source indicator icon (book, video, post, podcast). Clicking the icon opens a popup with detailed information about all sources supporting the given point: author, title, specific section/chapter, page or timestamp, direct link to the material (if available). A single point may reference multiple sources if the LLM synthesized the answer from several knowledge base fragments.
+
+This approach strengthens trust in the agent and differentiates the product from a typical voice bot — the user receives not only an answer but also a verifiable evidence base with precision down to a specific source fragment.
+
+### Emotional Adaptation
+
+The agent adapts its communication style to the user's emotional state. Emotional assessment is based on the two-dimensional Circumplex model (valence — positivity/negativity, arousal — degree of activation). This allows distinguishing fundamentally different states: a panic attack (negative + high arousal) from apathy (negative + low arousal) — and adapting tone, degree of empathy, and nature of recommendations accordingly.
+
+### Proactive Behavior
+
+The agent is not limited to reactive responses. During a prolonged pause after its response, the agent may gently initiate continuation of the dialogue: ask a clarifying question, suggest developing the topic, or ask if the user needs time to think. This makes the interaction more natural and closer to a live conversation with a specialist.
+
+### Crisis Protocol
+
+Upon detecting alarming signals (mention of suicidal thoughts, acute crisis, dangerous symptoms), the agent switches to a fixed response protocol: expresses empathy, does not dismiss the condition, recommends seeking professional help, and provides contact information for support services. Service contacts are determined dynamically based on the user's language/locale and stored in the database, not hardcoded in prompts or code. The agent does not diagnose, prescribe treatment, or substitute for a doctor.
+
+### MVP Boundaries
+
+- One agent with one expert topic
+- Up to 30 concurrent user sessions
+- Each user conducts an independent conversation with the agent
+- Beyond MVP: multi-agent routing, SIP telephony, horizontal scaling across multiple servers
+
+### Language Support
+
+At launch, the agent supports English and Russian. The architecture does not fundamentally restrict the set of languages — adding a new language depends solely on support for that language by the STT, TTS, and LLM providers in use. There are no hardcoded languages in the system: not in the pipeline, not in the prompts, not in the configuration.
+
+---
+
+## 2. Key Principles
+
+### Provider Agnosticism
+
+The central architectural principle is **maximum simplicity in replacing and adding providers** for three key components: speech recognition (STT), language model (LLM), and speech synthesis (TTS).
+
+Each component interacts with the system through a standardized interface. The agent's business logic is not tied to a specific provider. Replacing a provider means changing configuration, typically without code changes.
+
+**Practical caveat.** Providers differ in details: STT — in partial/final formats, punctuation; TTS — in emotion control, audio chunking; LLM — in response length, safety policies. Therefore, for MVP a "golden profile" of providers is established (Deepgram + Gemini Flash-Lite + Inworld), against which the UX is tested. Switching a provider is a supported scenario but requires UX verification. A practical guide to replacement is in [architecture.md](architecture.md).
 
 ```mermaid
 graph LR
-    subgraph "Провайдер-агностичная архитектура"
+    subgraph "Provider-Agnostic Architecture"
         direction TB
 
-        subgraph STT["STT-провайдеры"]
+        subgraph STT["STT Providers"]
             S1["Deepgram"]
             S2["Google"]
             S3["Azure"]
@@ -75,15 +75,15 @@ graph LR
             S5["Self-hosted Whisper"]
         end
 
-        subgraph LLM["LLM-провайдеры"]
+        subgraph LLM["LLM Providers"]
             L1["Google (Gemini)"]
             L2["OpenAI"]
             L3["Anthropic"]
             L4["DeepSeek"]
-            L5["Ollama (локальный)"]
+            L5["Ollama (local)"]
         end
 
-        subgraph TTS["TTS-провайдеры"]
+        subgraph TTS["TTS Providers"]
             T1["Inworld"]
             T2["ElevenLabs"]
             T3["Google"]
@@ -92,196 +92,196 @@ graph LR
         end
 
         STT -->|"LiveKit Agents<br/>STT Plugin"| PIPE["Voice Pipeline"]
-        LLM -->|"LiteLLM Proxy<br/>OpenAI-совместимый"| PIPE
+        LLM -->|"LiteLLM Proxy<br/>OpenAI-compatible"| PIPE
         TTS -->|"LiveKit Agents<br/>TTS Plugin"| PIPE
     end
 ```
 
-### Конфигурация через базу данных
+### Database-Driven Configuration
 
-Все промпты, настройки агента и параметры TTS хранятся в PostgreSQL, а не в коде:
+All prompts, agent settings, and TTS parameters are stored in PostgreSQL, not in code:
 
-- **Клонирование агентов** — создание нового агента сводится к копированию записей в БД и деплою того же Docker Compose с другой базой. Код един для всех агентов.
-- **Горячее обновление** — изменение промптов или настроек не требует пересборки контейнера. Изменения применяются только к новым сессиям.
-- **Версионирование** — история изменений хранится в БД с возможностью отката.
+- **Agent cloning** — creating a new agent comes down to copying database records and deploying the same Docker Compose with a different database. The code is shared across all agents.
+- **Hot updates** — changing prompts or settings does not require rebuilding the container. Changes apply only to new sessions.
+- **Versioning** — change history is stored in the database with rollback capability.
 
-**Config snapshot на сессию.** При старте сессии агент фиксирует текущую версию конфигурации (промпты, параметры TTS, настройки RAG). На протяжении всей сессии используется именно эта версия — даже если администратор обновил конфигурацию. Это предотвращает «смену личности» агента посреди диалога.
+**Config snapshot per session.** At session start, the agent captures the current configuration version (prompts, TTS parameters, RAG settings). This exact version is used throughout the entire session — even if an administrator updated the configuration. This prevents the agent from "changing personality" mid-dialogue.
 
-### Контейнеризация
+### Containerization
 
-Весь проект запускается исключительно из Docker Compose. Каждый компонент — отдельный контейнер. Локальная разработка, тестирование и продакшн — всё через Docker. Состав и конфигурация контейнеров описаны в [architecture.md](architecture.md).
+The entire project runs exclusively from Docker Compose. Each component is a separate container. Local development, testing, and production — all through Docker. Container composition and configuration are described in [architecture.md](architecture.md).
 
-### Стриминг на каждом этапе
+### Streaming at Every Stage
 
-Все компоненты voice pipeline работают в стриминговом режиме. STT отдаёт слова по мере произнесения. LLM стримит токены. TTS начинает синтез до завершения генерации полного ответа. Это минимизирует ощущаемую задержку и создаёт впечатление живого разговора.
+All voice pipeline components operate in streaming mode. STT delivers words as they are spoken. LLM streams tokens. TTS begins synthesis before the full response is generated. This minimizes perceived latency and creates the impression of a live conversation.
 
 ---
 
-## 3. Технологический стек
+## 3. Technology Stack
 
-> Минимальные версии и зависимости — в [specs.md](specs.md). Детали интеграции и схемы взаимодействия — в [architecture.md](architecture.md).
+> Minimum versions and dependencies — in [specs.md](specs.md). Integration details and interaction diagrams — in [architecture.md](architecture.md).
 
-### LiveKit Agents — ядро voice pipeline
+### LiveKit Agents — Voice Pipeline Core
 
-Open-source Python-фреймворк для голосовых AI-агентов реального времени. Агент работает как участник в LiveKit-комнате, обмениваясь аудио и данными через WebRTC. Выбран за: SFU-транспорт (стабильный коннект через NAT), встроенный Agent Server (job isolation, graceful shutdown, load balancing), плагинную систему для STT/LLM/TTS-провайдеров, встроенный VAD (Silero) и turn detector.
+An open-source Python framework for real-time voice AI agents. The agent operates as a participant in a LiveKit room, exchanging audio and data via WebRTC. Chosen for: SFU transport (stable connection through NAT), built-in Agent Server (job isolation, graceful shutdown, load balancing), plugin system for STT/LLM/TTS providers, built-in VAD (Silero) and turn detector.
 
-### Deepgram Nova-3 — распознавание речи (STT)
+### Deepgram Nova-3 — Speech Recognition (STT)
 
-Стриминговое распознавание с задержкой ~300 мс до первого слова. Поддержка 45+ языков, включая русский и английский. Дополнительно предоставляет sentiment-анализ (-1..1) для каждого сегмента без дополнительной задержки — используется как быстрый сигнал для эмоциональной модели.
+Streaming recognition with ~300 ms latency to the first word. Support for 45+ languages, including Russian and English. Additionally provides sentiment analysis (-1..1) for each segment with no additional latency — used as a fast signal for the emotional model.
 
-### Inworld AI — синтез речи (TTS)
+### Inworld AI — Speech Synthesis (TTS)
 
-Первое место на Artificial Analysis TTS Arena. 15 языков, включая русский и английский. Две модели: TTS-1.5 Max (~200 мс, $10/1M символов) и TTS-1.5 Mini (~100 мс, $5/1M символов). Контроль экспрессивности и скорости, zero-shot voice cloning из 5–15 секунд аудио.
+First place on Artificial Analysis TTS Arena. 15 languages, including Russian and English. Two models: TTS-1.5 Max (~200 ms, $10/1M characters) and TTS-1.5 Mini (~100 ms, $5/1M characters). Expressiveness and speed control, zero-shot voice cloning from 5–15 seconds of audio.
 
-Альтернативный провайдер — **ElevenLabs** как fallback или альтернатива для языков/голосов, где Inworld не обеспечивает нужного качества.
+Alternative provider — **ElevenLabs** as a fallback or alternative for languages/voices where Inworld does not deliver the required quality.
 
-### Google Gemini Flash-Lite + LiteLLM Proxy — языковая модель
+### Google Gemini Flash-Lite + LiteLLM Proxy — Language Model
 
-**Gemini 3.1 Flash-Lite** — основная модель, выбрана за сверхнизкую задержку генерации. **GPT-4.1-mini** — fallback при недоступности основного провайдера.
+**Gemini 3.1 Flash-Lite** — the primary model, chosen for ultra-low generation latency. **GPT-4.1-mini** — fallback when the primary provider is unavailable.
 
-**LiteLLM Proxy** — OpenAI-совместимый шлюз между агентом и LLM-провайдерами. Единый интерфейс, автоматический fallback, трекинг расходов, rate limiting. Агентский код обращается к LiteLLM по единому адресу и не знает, какая модель работает за прокси.
+**LiteLLM Proxy** — an OpenAI-compatible gateway between the agent and LLM providers. Unified interface, automatic fallback, cost tracking, rate limiting. The agent code calls LiteLLM at a single address and does not know which model is running behind the proxy.
 
-### PostgreSQL + pgvector — данные и RAG
+### PostgreSQL + pgvector — Data and RAG
 
-PostgreSQL — единое хранилище: конфигурация агента, история сессий и сообщений, профили пользователей, эмоциональные данные, база знаний с векторными эмбеддингами (через расширение pgvector). Единая транзакционная модель — метаданные и векторы в одной базе, атомарные операции, единый бэкап.
+PostgreSQL — a unified store: agent configuration, session and message history, user profiles, emotional data, knowledge base with vector embeddings (via the pgvector extension). A single transactional model — metadata and vectors in one database, atomic operations, unified backup.
 
 ### FastAPI — REST API
 
-HTTP-эндпоинты для операций вне real-time чата: аутентификация, генерация LiveKit-токенов, история диалогов, метаданные источников для попапов атрибуции, административные эндпоинты. Чат (голосовой и текстовый) целиком идёт через LiveKit.
+HTTP endpoints for operations outside the real-time chat: authentication, LiveKit token generation, dialogue history, source metadata for attribution popups, administrative endpoints. Chat (voice and text) runs entirely through LiveKit.
 
-### WebRTC через LiveKit SFU — транспорт
+### WebRTC via LiveKit SFU — Transport
 
-LiveKit Server (self-hosted) — SFU-медиасервер. Сигналинг (HTTP/WebSocket) проксируется через Caddy с TLS-терминацией. Медиа (аудио/видео по UDP) идёт напрямую между клиентом и LiveKit, минуя HTTP-прокси. TURN-сервер (coturn) — fallback для клиентов за жёстким NAT.
+LiveKit Server (self-hosted) — SFU media server. Signaling (HTTP/WebSocket) is proxied through Caddy with TLS termination. Media (audio/video over UDP) goes directly between the client and LiveKit, bypassing the HTTP proxy. TURN server (coturn) — fallback for clients behind strict NAT.
 
-### PWA (React) — клиент
+### PWA (React) — Client
 
-React-приложение с двумя каналами связи: **LiveKit Client SDK** для real-time чата в обоих режимах (голос — WebRTC-аудио, текст — data channel) и **FastAPI** (HTTP) для REST-операций (аутентификация, история, источники). Голосовой и текстовый чат в едином интерфейсе. Переключение между режимами мгновенное — клиент всегда подключён к LiveKit-комнате.
-
----
-
-## 4. База знаний и RAG
-
-### Концепция
-
-Экспертные материалы (книги, статьи, подкасты, интервью) проходят предварительную обработку: извлечение текста, семантическое чанкирование по смысловым блокам (не по фиксированному количеству токенов), обогащение метаданными (автор, название, раздел, страница, таймкод) и генерация эмбеддингов. Результат хранится в PostgreSQL с HNSW-индексом для ANN-поиска.
-
-При каждом обращении к LLM релевантные фрагменты извлекаются по семантической близости к запросу и включаются в контекст — с метаданными для формирования ссылок в ответе. Используется гибридный поиск: векторный (cosine distance, pgvector) + полнотекстовый (tsvector) + фильтры по метаданным.
-
-### Атрибуция источников
-
-Каждый тезис в текстовом ответе сопровождается идентификаторами RAG-фрагментов. Клиент отображает иконки-индикаторы (книга, видео, подкаст, статья) с кликабельными попапами: автор, название, раздел, страница/таймкод, ссылка. В голосовом ответе агент упоминает источник устно: «как пишет доктор Иванов в своей книге...».
-
-Если агент отвечает на основе общих знаний модели (без подтверждения из базы знаний), он явно маркирует это как рассуждение, а не установленный факт.
-
-### Языковая специфика
-
-Материалы в базе знаний могут быть на разных языках. Фильтрация по языку приоритизирует фрагменты на том же языке, но не исключает кросс-языковые результаты — если embedding-модель мультиязычная, релевантный фрагмент на одном языке может быть полезен для ответа на другом.
-
-### GraphRAG (пост-MVP)
-
-Для тем, где критически важны связи между сущностями (болезнь → симптомы → противопоказания → рекомендации), планируется GraphRAG — подход, объединяющий векторный поиск с графами знаний. Варианты реализации: Microsoft GraphRAG, FalkorDB.
+A React application with two communication channels: **LiveKit Client SDK** for real-time chat in both modes (voice — WebRTC audio, text — data channel) and **FastAPI** (HTTP) for REST operations (authentication, history, sources). Voice and text chat in a unified interface. Switching between modes is instant — the client is always connected to the LiveKit room.
 
 ---
 
-## 5. Эмоциональная адаптация
+## 4. Knowledge Base and RAG
 
-### Модель Circumplex
+### Concept
 
-Вместо линейной шкалы sentiment (-1..1) система использует двумерную психологическую модель Circumplex:
+Expert materials (books, articles, podcasts, interviews) undergo preprocessing: text extraction, semantic chunking by meaning blocks (not by a fixed number of tokens), metadata enrichment (author, title, section, page, timestamp), and embedding generation. The result is stored in PostgreSQL with an HNSW index for ANN search.
 
-- **Valence (Валентность):** позитивная ↔ негативная эмоция
-- **Arousal (Возбуждение):** пассивность ↔ активность
+With each LLM request, relevant fragments are retrieved by semantic similarity to the query and included in the context — with metadata for forming references in the response. Hybrid search is used: vector (cosine distance, pgvector) + full-text (tsvector) + metadata filters.
 
-Это позволяет различать состояния, неразличимые одномерной шкалой:
+### Source Attribution
 
-| Состояние | Valence | Arousal | Реакция агента |
-|-----------|---------|---------|----------------|
-| Паника, тревога | Негативная | Высокое | Успокаивающий тон, замедление темпа, простые вопросы |
-| Апатия, подавленность | Негативная | Низкое | Мягкая вовлечённость, деликатные вопросы, без давления |
-| Энтузиазм, радость | Позитивная | Высокое | Поддержка энергии, конкретные шаги, развитие темы |
-| Спокойствие, удовлетворение | Позитивная | Низкое | Профессиональный тон, информативные ответы |
+Each point in the text response is accompanied by RAG fragment identifiers. The client displays indicator icons (book, video, podcast, article) with clickable popups: author, title, section, page/timestamp, link. In the voice response, the agent mentions the source verbally: "as Dr. Ivanov writes in his book..."
 
-### Источники данных (MVP)
+If the agent responds based on the model's general knowledge (without confirmation from the knowledge base), it explicitly marks this as reasoning, not an established fact.
 
-**Быстрый сигнал** — sentiment score от Deepgram (-1..1) для каждого сегмента транскрипта. Поступает без дополнительной задержки как часть STT-результата.
+### Language Specifics
 
-**LLM-интерпретация** — LLM оценивает состояние пользователя в двумерном пространстве (valence/arousal) на основе текста, sentiment score, контекста предыдущих реплик и динамики изменений (тренд).
+Materials in the knowledge base may be in different languages. Language filtering prioritizes fragments in the same language but does not exclude cross-language results — if the embedding model is multilingual, a relevant fragment in one language may be useful for answering in another.
 
-**Акустический анализ (пост-MVP)** — Speech Emotion Recognition по акустическим характеристикам голоса (тембр, высота, темп, громкость). Позволит детектировать случаи, когда текст нейтрален, но голос выдаёт тревогу.
+### GraphRAG (Post-MVP)
+
+For topics where relationships between entities are critically important (disease → symptoms → contraindications → recommendations), GraphRAG is planned — an approach combining vector search with knowledge graphs. Implementation options: Microsoft GraphRAG, FalkorDB.
+
+---
+
+## 5. Emotional Adaptation
+
+### Circumplex Model
+
+Instead of a linear sentiment scale (-1..1), the system uses the two-dimensional psychological Circumplex model:
+
+- **Valence:** positive ↔ negative emotion
+- **Arousal:** passivity ↔ activity
+
+This allows distinguishing states that are indistinguishable on a one-dimensional scale:
+
+| State | Valence | Arousal | Agent Response |
+|-------|---------|---------|----------------|
+| Panic, anxiety | Negative | High | Calming tone, slowed pace, simple questions |
+| Apathy, depression | Negative | Low | Gentle engagement, delicate questions, no pressure |
+| Enthusiasm, joy | Positive | High | Energy support, concrete steps, topic development |
+| Calm, satisfaction | Positive | Low | Professional tone, informative answers |
+
+### Data Sources (MVP)
+
+**Fast signal** — sentiment score from Deepgram (-1..1) for each transcript segment. Arrives with no additional latency as part of the STT result.
+
+**LLM interpretation** — the LLM evaluates the user's state in the two-dimensional space (valence/arousal) based on text, sentiment score, context of previous utterances, and change dynamics (trend).
+
+**Acoustic analysis (post-MVP)** — Speech Emotion Recognition based on acoustic voice characteristics (timbre, pitch, tempo, volume). Will enable detecting cases where the text is neutral but the voice reveals anxiety.
 
 ```mermaid
 flowchart TB
-    subgraph "Эмоциональная модель Circumplex"
+    subgraph "Circumplex Emotional Model"
         direction LR
-        L1["<b>Быстрый сигнал (MVP)</b><br/>Sentiment от Deepgram<br/>Score: -1..1"]
-        L2["<b>LLM-интерпретация (MVP)</b><br/>Valence + Arousal<br/>Контекст, тренд, динамика"]
-        L3["<b>Акустический SER (пост-MVP)</b><br/>Тембр, темп,<br/>громкость"]
+        L1["<b>Fast Signal (MVP)</b><br/>Sentiment from Deepgram<br/>Score: -1..1"]
+        L2["<b>LLM Interpretation (MVP)</b><br/>Valence + Arousal<br/>Context, trend, dynamics"]
+        L3["<b>Acoustic SER (post-MVP)</b><br/>Timbre, tempo,<br/>volume"]
     end
 
-    L1 --> CONTEXT["Контекст LLM<br/>(Circumplex: valence + arousal)"]
+    L1 --> CONTEXT["LLM Context<br/>(Circumplex: valence + arousal)"]
     L2 --> CONTEXT
-    L3 -.->|"будущее"| CONTEXT
+    L3 -.->|"future"| CONTEXT
 
-    CONTEXT --> RESPONSE["Адаптированный<br/>ответ агента"]
+    CONTEXT --> RESPONSE["Adapted<br/>agent response"]
 ```
 
 ---
 
-## 6. Система промптов
+## 6. Prompt System
 
-Промпт-система состоит из нескольких слоёв, каждый из которых решает конкретную задачу. Все промпты хранятся в PostgreSQL (не в коде) и загружаются при инициализации агента.
+The prompt system consists of several layers, each solving a specific task. All prompts are stored in PostgreSQL (not in code) and loaded during agent initialization.
 
-### Системный промпт агента
+### Agent System Prompt
 
-Определяет роль и специализацию агента, задаёт тон общения (эмпатичный, профессиональный, не менторский), устанавливает границы компетенции (о чём агент может говорить, о чём нет). Инструктирует по использованию RAG-контекста: ссылаться на источники, не выдумывать факты. Определяет поведение при неопределённости: признавать незнание, рекомендовать обратиться к реальному специалисту.
+Defines the agent's role and specialization, sets the communication tone (empathetic, professional, not condescending), establishes competence boundaries (what the agent can and cannot discuss). Instructs on using RAG context: reference sources, do not fabricate facts. Defines behavior under uncertainty: acknowledge lack of knowledge, recommend consulting a real specialist.
 
-### Промпт адаптации к голосовому режиму
+### Voice Mode Adaptation Prompt
 
-Инструктирует LLM генерировать разговорную, а не письменную речь. Допускать филлеры, вводные слова, мягкие паузы. Ограничивать длину для голоса (2–5 коротких фраз) и давать развёрнутые ответы в текстовом режиме. Запрещает markdown, списки, ссылки в устной речи.
+Instructs the LLM to generate conversational rather than written speech. Allow fillers, introductory words, soft pauses. Limit length for voice (2–5 short phrases) and provide detailed answers in text mode. Prohibits markdown, lists, and links in spoken speech.
 
-### Промпт двухслойного ответа
+### Two-Layer Response Prompt
 
-Инструктирует LLM формировать ответ в двух частях:
-- **Голосовая часть** — краткие тезисы, разговорный стиль. При упоминании источника — кратко вслух («как пишет доктор Иванов...»).
-- **Текстовая часть** — те же тезисы структурированно, с идентификаторами RAG-фрагментов для иконок-источников в клиенте.
+Instructs the LLM to form a response in two parts:
+- **Voice part** — brief points, conversational style. When mentioning a source — briefly aloud ("as Dr. Ivanov writes...").
+- **Text part** — the same points structured, with RAG fragment identifiers for source icons in the client.
 
-### Промпт эмоциональной адаптации (Circumplex)
+### Emotional Adaptation Prompt (Circumplex)
 
-Инструктирует LLM оценивать состояние пользователя в двумерном пространстве (valence/arousal), определяет стратегии адаптации для каждого квадранта, запрещает обесценивание эмоций, учитывает динамику тренда.
+Instructs the LLM to evaluate the user's state in the two-dimensional space (valence/arousal), defines adaptation strategies for each quadrant, prohibits dismissing emotions, accounts for trend dynamics.
 
-### Промпт кризисного протокола
+### Crisis Protocol Prompt
 
-Фиксированные правила реагирования на тревожные сигналы: эмпатия, рекомендация обратиться к специалисту, контакты экстренных служб. Высший приоритет — не переопределяется контекстом диалога.
+Fixed response rules for alarming signals: empathy, recommendation to consult a specialist, emergency service contacts. Highest priority — not overridden by dialogue context.
 
-### Промпт для RAG-контекста
+### RAG Context Prompt
 
-Инструктирует по использованию фрагментов базы знаний. Приоритет: информация из базы выше общих знаний модели. Запрещает выдумывание. Если агент отвечает без подтверждения из базы знаний — явно маркирует как рассуждение, а не факт.
+Instructions for using knowledge base fragments. Priority: information from the knowledge base takes precedence over the model's general knowledge. Fabrication is prohibited. If the agent responds without confirmation from the knowledge base — it explicitly marks the response as reasoning, not fact.
 
-### Промпт языковой адаптации
+### Language Adaptation Prompt
 
-Инструктирует отвечать на языке пользователя. Определяет поведение при смене языка в середине диалога. При необходимости задаёт терминологические предпочтения.
+Instructs to respond in the user's language. Defines behavior when the language changes mid-dialogue. Sets terminology preferences when necessary.
 
-### Промпт проактивных реплик
+### Proactive Utterance Prompt
 
-Инструктирует генерировать фразы для продолжения диалога при затянувшейся паузе. Фразы учитывают контекст и эмоциональное состояние. Не чаще одного раза за паузу.
+Instructs to generate phrases for continuing the dialogue during a prolonged pause. Phrases account for context and emotional state. No more than once per pause.
 
-### Динамические компоненты промпта
+### Dynamic Prompt Components
 
-При каждом запросе к LLM формируются:
-- Текущая эмоциональная оценка (valence, arousal) и тренд сессии
-- RAG-фрагменты с метаданными источников
-- Информация о режиме общения (голос/текст) для адаптации формата
-- Флаг проактивной реплики (если запрос инициирован таймером тишины)
+With each LLM request, the following are formed:
+- Current emotional assessment (valence, arousal) and session trend
+- RAG fragments with source metadata
+- Information about the communication mode (voice/text) for format adaptation
+- Proactive utterance flag (if the request was initiated by a silence timer)
 
 ---
 
-## 7. Развитие (пост-MVP)
+## 7. Future Development (Post-MVP)
 
-- **Горизонтальное масштабирование** — несколько Agent Server с автоматическим load balancing
-- **Кластеризация LiveKit** — несколько нод или переход на LiveKit Cloud
-- **Self-hosted STT/TTS** — Faster-Whisper, XTTS v2 для снижения стоимости и приватности
-- **Self-hosted LLM** — Ollama/vLLM через LiteLLM на GPU
-- **Мульти-агентная архитектура** — разные агенты для разных специализаций
-- **GraphRAG** — графы знаний для цепочек «болезнь → симптомы → рекомендации»
-- **LLM Observability** — Langfuse/Phoenix для трейсинга RAG, эмоций, кризисных срабатываний
-- **Акустический анализ эмоций** — Speech Emotion Recognition по характеристикам голоса
+- **Horizontal scaling** — multiple Agent Servers with automatic load balancing
+- **LiveKit clustering** — multiple nodes or migration to LiveKit Cloud
+- **Self-hosted STT/TTS** — Faster-Whisper, XTTS v2 for cost reduction and privacy
+- **Self-hosted LLM** — Ollama/vLLM via LiteLLM on GPU
+- **Multi-agent architecture** — different agents for different specializations
+- **GraphRAG** — knowledge graphs for chains like "disease → symptoms → recommendations"
+- **LLM Observability** — Langfuse/Phoenix for tracing RAG, emotions, crisis triggers
+- **Acoustic emotion analysis** — Speech Emotion Recognition based on voice characteristics

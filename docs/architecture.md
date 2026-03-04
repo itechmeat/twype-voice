@@ -1,46 +1,46 @@
-# Архитектура проекта
+# Project Architecture
 
-**Версия:** 2.0 — MVP
-**Дата:** март 2026
+**Version:** 2.0 — MVP
+**Date:** March 2026
 
-> Техническая архитектура системы: компоненты, потоки данных, протоколы. Описание продукта — в [about.md](about.md), спецификации стека — в [specs.md](specs.md).
+> Technical system architecture: components, data flows, protocols. Product description — in [about.md](about.md), stack specifications — in [specs.md](specs.md).
 
 ---
 
-## 1. Системная архитектура
+## 1. System Architecture
 
-### 1.1 Общая архитектура
+### 1.1 High-Level Architecture
 
-Система состоит из семи Docker-контейнеров на одном VPS, взаимодействующих с PWA-клиентом и внешними API-провайдерами.
+The system consists of seven Docker containers on a single VPS, interacting with a PWA client and external API providers.
 
 ```mermaid
 graph TB
-    subgraph CLIENT["PWA-клиент (React)"]
-        UI["LiveKit Client SDK +<br/>HTTP клиент"]
+    subgraph CLIENT["PWA Client (React)"]
+        UI["LiveKit Client SDK +<br/>HTTP Client"]
     end
 
     subgraph VPS["VPS — Docker Compose"]
         CADDY["Caddy<br/>Reverse proxy + SSL"]
 
         subgraph API_SVC["FastAPI (Python)"]
-            AUTH["Аутентификация<br/>JWT"]
-            HISTORY["История<br/>Источники"]
-            LK_TOKEN["Генерация<br/>LiveKit-токенов"]
+            AUTH["Authentication<br/>JWT"]
+            HISTORY["History<br/>Sources"]
+            LK_TOKEN["LiveKit Token<br/>Generation"]
         end
 
         subgraph LIVEKIT_SVC["LiveKit Server (Go)"]
-            SFU["SFU<br/>Маршрутизация медиа"]
-            DC["Data Channels<br/>Текстовый чат"]
+            SFU["SFU<br/>Media Routing"]
+            DC["Data Channels<br/>Text Chat"]
         end
 
-        COTURN["coturn<br/>TURN-сервер"]
+        COTURN["coturn<br/>TURN Server"]
 
         subgraph AGENT["LiveKit Agent (Python)"]
             VAD["Silero VAD"]
             TD["Turn Detector"]
-            STT_P["STT-плагин"]
-            ORCH["Orchestrator<br/>Контекст, RAG, эмоции"]
-            TTS_P["TTS-плагин"]
+            STT_P["STT Plugin"]
+            ORCH["Orchestrator<br/>Context, RAG, Emotions"]
+            TTS_P["TTS Plugin"]
             DC_HANDLER["Data Channel<br/>Handler"]
         end
 
@@ -48,52 +48,52 @@ graph TB
         PG["PostgreSQL + pgvector"]
     end
 
-    subgraph EXT["Внешние API"]
+    subgraph EXT["External APIs"]
         STT_API["Deepgram API"]
         LLM_API["Google / OpenAI API"]
         TTS_API["Inworld / ElevenLabs API"]
     end
 
     UI <-->|"HTTPS + WebSocket"| CADDY
-    UI <-->|"WebRTC медиа (UDP)"| LIVEKIT_SVC
-    CADDY <-->|"сигналинг (HTTP/WS)"| LIVEKIT_SVC
-    CADDY <-->|"проксирует"| API_SVC
-    LIVEKIT_SVC <-->|"WebRTC медиа<br/>+ data channel"| AGENT
+    UI <-->|"WebRTC media (UDP)"| LIVEKIT_SVC
+    CADDY <-->|"signaling (HTTP/WS)"| LIVEKIT_SVC
+    CADDY <-->|"proxies"| API_SVC
+    LIVEKIT_SVC <-->|"WebRTC media<br/>+ data channel"| AGENT
     UI -.->|"TURN relay (fallback)"| COTURN
     ORCH <-->|"SQL + pgvector"| PG
-    ORCH <-->|"OpenAI-совместимый"| LITELLM
+    ORCH <-->|"OpenAI-compatible"| LITELLM
     API_SVC <-->|"SQL"| PG
     STT_P <-->|"WebSocket"| STT_API
     LITELLM <-->|"HTTPS"| LLM_API
     TTS_P <-->|"WebSocket / HTTPS"| TTS_API
 ```
 
-**Разделение сигналинга и медиа.** LiveKit использует два типа соединений:
+**Separation of signaling and media.** LiveKit uses two types of connections:
 
-- **Сигналинг (HTTP/WebSocket)** — управление комнатами, авторизация, обмен ICE-кандидатами. Проксируется через Caddy (порт 443) с TLS-терминацией.
-- **Медиа (UDP)** — аудио/видеопотоки (RTP/RTCP). Идут **напрямую** между клиентом и LiveKit Server по UDP, минуя Caddy. LiveKit публикует диапазон UDP-портов (50000–60000) для прямого ICE-подключения.
+- **Signaling (HTTP/WebSocket)** — room management, authorization, ICE candidate exchange. Proxied through Caddy (port 443) with TLS termination.
+- **Media (UDP)** — audio/video streams (RTP/RTCP). Go **directly** between the client and LiveKit Server over UDP, bypassing Caddy. LiveKit publishes a UDP port range (50000–60000) for direct ICE connections.
 
-Caddy **не проксирует медиа-трафик** — HTTP reverse proxy не способен обрабатывать WebRTC UDP-потоки. Клиент получает ICE-кандидаты через сигналинг и устанавливает прямое UDP-соединение с LiveKit.
+Caddy **does not proxy media traffic** — an HTTP reverse proxy cannot handle WebRTC UDP streams. The client receives ICE candidates through signaling and establishes a direct UDP connection to LiveKit.
 
-TURN-сервер (coturn) — **fallback** для клиентов за жёстким NAT (корпоративные сети, мобильные операторы, Symmetric NAT). Прямое UDP-соединение приоритетнее — TURN увеличивает задержку. Все соединения шифрованы (DTLS-SRTP).
+TURN server (coturn) — a **fallback** for clients behind strict NAT (corporate networks, mobile carriers, Symmetric NAT). Direct UDP connection takes priority — TURN increases latency. All connections are encrypted (DTLS-SRTP).
 
-**LiteLLM Proxy** находится на критическом пути голосового pipeline — его недоступность означает невозможность генерации ответов. Необходимы: health check контейнера, таймауты на запросы со стороны агента, корректная обработка ситуации «LLM недоступен» (агент сообщает пользователю о проблеме, а не зависает). В зависимости от режима запуска для применения изменений конфигурации может потребоваться рестарт LiteLLM-контейнера.
+**LiteLLM Proxy** is on the critical path of the voice pipeline — its unavailability means responses cannot be generated. Required: container health check, request timeouts on the agent side, proper handling of the "LLM unavailable" scenario (the agent informs the user about the issue rather than hanging). Depending on the startup mode, a LiteLLM container restart may be required to apply configuration changes.
 
-### 1.2 Docker Compose топология
+### 1.2 Docker Compose Topology
 
 ```mermaid
 graph TB
     subgraph COMPOSE["Docker Compose"]
         direction TB
 
-        subgraph NET["Внутренняя сеть: twype-net"]
-            CADDY["<b>caddy</b><br/>Caddy 2 Alpine<br/>:80, :443 → внешние"]
-            API["<b>api</b><br/>FastAPI<br/>:8000 → внутренний"]
-            LIVEKIT["<b>livekit</b><br/>LiveKit Server<br/>:7880 → внутренний (сигналинг)<br/>:7881 TCP → внешний (RTC fallback)<br/>50000-60000 UDP → внешний (медиа)"]
-            AGENT["<b>agent</b><br/>LiveKit Agent<br/>без открытых портов"]
-            LITELLM["<b>litellm</b><br/>LiteLLM Proxy<br/>:4000 → внутренний"]
-            PG["<b>postgres</b><br/>PostgreSQL 18<br/>:5432 → внутренний"]
-            COTURN["<b>coturn</b><br/>TURN-сервер<br/>:3478, :5349 → внешние<br/>49152-65535 UDP → внешние"]
+        subgraph NET["Internal Network: twype-net"]
+            CADDY["<b>caddy</b><br/>Caddy 2 Alpine<br/>:80, :443 → external"]
+            API["<b>api</b><br/>FastAPI<br/>:8000 → internal"]
+            LIVEKIT["<b>livekit</b><br/>LiveKit Server<br/>:7880 → internal (signaling)<br/>:7881 TCP → external (RTC fallback)<br/>50000-60000 UDP → external (media)"]
+            AGENT["<b>agent</b><br/>LiveKit Agent<br/>no exposed ports"]
+            LITELLM["<b>litellm</b><br/>LiteLLM Proxy<br/>:4000 → internal"]
+            PG["<b>postgres</b><br/>PostgreSQL 18<br/>:5432 → internal"]
+            COTURN["<b>coturn</b><br/>TURN Server<br/>:3478, :5349 → external<br/>49152-65535 UDP → external"]
         end
     end
 
@@ -111,49 +111,49 @@ graph TB
     LITELLM --- V_LLM
     COTURN --- V_TURN
 
-    CADDY -->|"сигналинг (HTTP/WS)"| LIVEKIT
+    CADDY -->|"signaling (HTTP/WS)"| LIVEKIT
     CADDY -->|"reverse proxy"| API
     AGENT -->|"LiveKit SDK"| LIVEKIT
-    AGENT -->|"LLM-запросы"| LITELLM
-    AGENT -->|"данные + RAG"| PG
-    API -->|"данные"| PG
+    AGENT -->|"LLM requests"| LITELLM
+    AGENT -->|"data + RAG"| PG
+    API -->|"data"| PG
     LIVEKIT -->|"TURN relay"| COTURN
 
-    INET["Интернет"] <-->|"TCP 80, 443"| CADDY
+    INET["Internet"] <-->|"TCP 80, 443"| CADDY
     INET <-->|"TCP 7881<br/>UDP 50000-60000"| LIVEKIT
     INET <-->|"TCP/UDP 3478<br/>TCP 5349<br/>UDP 49152-65535"| COTURN
 ```
 
-Состав контейнеров:
+Container overview:
 
-- **api** — FastAPI (Python). REST API: аутентификация, генерация LiveKit-токенов, история диалогов, метаданные источников, администрирование. Подключается к PostgreSQL. Проксируется через Caddy. Зависит от postgres.
-- **agent** — LiveKit Agent (Python). Voice pipeline (VAD, Turn Detection, STT/TTS-плагины), обработка контекста, эмоции, RAG. Кастомный TTS-плагин Inworld (разрабатывается с прицелом на PR в репозиторий LiveKit Agents; независимо от принятия используется как локальный модуль). Зависит от livekit, litellm, postgres.
-- **livekit** — LiveKit Server (Go). SFU-медиасервер: комнаты, маршрутизация медиапотоков, авторизация участников. Легковесный (~50–100 MB RAM). Конфигурация через YAML-файл (volume). Порт 7880 (сигналинг) проксируется через Caddy; порты 7881 TCP и 50000–60000 UDP — напрямую наружу.
-- **coturn** — TURN-сервер. Relay WebRTC-трафика для клиентов за жёстким NAT. Обязательный компонент для стабильного коннекта в реальных сетевых условиях.
-- **litellm** — LiteLLM Proxy. OpenAI-совместимый шлюз к LLM-провайдерам. Конфигурация через YAML-файл (volume).
-- **postgres** — PostgreSQL 18 + pgvector. Все данные приложения и RAG-эмбеддинги. Персистенция через Docker volume.
-- **caddy** — Caddy 2 Alpine. Reverse proxy + автоматический SSL (Let's Encrypt). Проксирует HTTP/WS к LiveKit (сигналинг) и REST API к FastAPI. **Не проксирует WebRTC медиа.**
+- **api** — FastAPI (Python). REST API: authentication, LiveKit token generation, dialog history, source metadata, administration. Connects to PostgreSQL. Proxied through Caddy. Depends on postgres.
+- **agent** — LiveKit Agent (Python). Voice pipeline (VAD, Turn Detection, STT/TTS plugins), context processing, emotions, RAG. Custom Inworld TTS plugin (developed with the intent to submit a PR to the LiveKit Agents repository; used as a local module regardless of acceptance). Depends on livekit, litellm, postgres.
+- **livekit** — LiveKit Server (Go). SFU media server: rooms, media stream routing, participant authorization. Lightweight (~50–100 MB RAM). Configured via YAML file (volume). Port 7880 (signaling) proxied through Caddy; ports 7881 TCP and 50000–60000 UDP — exposed directly.
+- **coturn** — TURN server. Relays WebRTC traffic for clients behind strict NAT. A required component for stable connectivity in real-world network conditions.
+- **litellm** — LiteLLM Proxy. OpenAI-compatible gateway to LLM providers. Configured via YAML file (volume).
+- **postgres** — PostgreSQL 18 + pgvector. All application data and RAG embeddings. Persistence via Docker volume.
+- **caddy** — Caddy 2 Alpine. Reverse proxy + automatic SSL (Let's Encrypt). Proxies HTTP/WS to LiveKit (signaling) and REST API to FastAPI. **Does not proxy WebRTC media.**
 
-**Требования к серверу** (10–30 одновременных голосовых сессий):
+**Server requirements** (10–30 concurrent voice sessions):
 
-| Ресурс | Требование |
-|--------|-----------|
-| CPU | 4–8 ядер |
+| Resource | Requirement |
+|----------|-------------|
+| CPU | 4–8 cores |
 | RAM | 8–16 GB |
-| Диск | 50 GB SSD |
-| ОС | Ubuntu 22.04+ (любой Linux с Docker) |
+| Disk | 50 GB SSD |
+| OS | Ubuntu 22.04+ (any Linux with Docker) |
 
-Каждая активная сессия агента — отдельный Python-процесс (~100–200 MB RAM). Основная нагрузка — сетевая (WebRTC через SFU) и I/O (обращения к внешним API).
+Each active agent session is a separate Python process (~100–200 MB RAM). The main load is network (WebRTC through SFU) and I/O (calls to external APIs).
 
-### 1.3 Сетевая карта
+### 1.3 Network Map
 
 ```mermaid
 graph LR
-    subgraph INTERNET["Интернет"]
-        BROWSER["Браузер<br/>(PWA)"]
+    subgraph INTERNET["Internet"]
+        BROWSER["Browser<br/>(PWA)"]
     end
 
-    subgraph FIREWALL["Открытые порты VPS"]
+    subgraph FIREWALL["VPS Open Ports"]
         P80["TCP 80<br/>HTTP → Caddy"]
         P443["TCP 443<br/>HTTPS → Caddy"]
         P7881["TCP 7881<br/>WebRTC TCP fallback → LiveKit"]
@@ -163,7 +163,7 @@ graph LR
         PUDP["UDP 49152-65535<br/>TURN relay → coturn"]
     end
 
-    subgraph INTERNAL["Внутренняя Docker-сеть"]
+    subgraph INTERNAL["Internal Docker Network"]
         P8000["TCP 8000<br/>FastAPI"]
         P7880["TCP 7880<br/>LiveKit HTTP/WS"]
         P7881["TCP 7881<br/>LiveKit RTC"]
@@ -179,28 +179,28 @@ graph LR
     BROWSER -->|"TURNS"| P5349
     BROWSER -->|"UDP relay"| PUDP
 
-    P443 -->|"Caddy проксирует"| P8000
-    P443 -->|"Caddy проксирует"| P7880
+    P443 -->|"Caddy proxies"| P8000
+    P443 -->|"Caddy proxies"| P7880
 ```
 
-Сводка сетевых требований:
+Network requirements summary:
 
-| Порт | Протокол | Назначение |
-|------|----------|-----------|
-| 80 | TCP | HTTP → Caddy (редирект на HTTPS) |
-| 443 | TCP | HTTPS → Caddy (API + сигналинг LiveKit) |
-| 7880 | TCP | LiveKit API/WebSocket (внутренний, через Caddy) |
-| 7881 | TCP | LiveKit WebRTC TCP fallback (публичный) |
-| 50000–60000 | UDP | LiveKit WebRTC медиа RTP/RTCP (публичный) |
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 80 | TCP | HTTP → Caddy (redirect to HTTPS) |
+| 443 | TCP | HTTPS → Caddy (API + LiveKit signaling) |
+| 7880 | TCP | LiveKit API/WebSocket (internal, through Caddy) |
+| 7881 | TCP | LiveKit WebRTC TCP fallback (public) |
+| 50000–60000 | UDP | LiveKit WebRTC media RTP/RTCP (public) |
 | 3478 | TCP/UDP | TURN (coturn) |
 | 5349 | TCP | TURN over TLS (coturn) |
 | 49152–65535 | UDP | TURN relay range (coturn) |
 
 ---
 
-## 2. Структура monorepo
+## 2. Monorepo Structure
 
-### 2.1 Директории проекта
+### 2.1 Project Directories
 
 ```mermaid
 graph TD
@@ -228,7 +228,7 @@ graph TD
     WEB --> WEB_PUB["public/"]
     WEB --> WEB_TEST["tests/"]
 
-    PKGS --> SHARED["shared/<br/>Общие типы"]
+    PKGS --> SHARED["shared/<br/>Shared Types"]
 
     DOCKER --> DF_API["Dockerfile.api"]
     DOCKER --> DF_AG["Dockerfile.agent"]
@@ -250,113 +250,113 @@ graph TD
 
 ## 3. User Flows
 
-### 3.1 Регистрация и верификация email
+### 3.1 Registration and Email Verification
 
 ```mermaid
 sequenceDiagram
-    participant U as Пользователь
-    participant PWA as PWA-клиент
+    participant U as User
+    participant PWA as PWA Client
     participant API as FastAPI
     participant DB as PostgreSQL
     participant R as Resend
 
-    U->>PWA: Заполняет форму<br/>(email + password)
+    U->>PWA: Fills out form<br/>(email + password)
     PWA->>API: POST /auth/register<br/>{email, password}
-    API->>API: Валидация email, пароля
+    API->>API: Validate email, password
     API->>API: bcrypt(password)
     API->>DB: INSERT users<br/>(is_verified = false)
-    API->>API: Генерация 6-значного кода
-    API->>DB: Сохранение кода + TTL
-    API->>R: Отправка email<br/>с кодом подтверждения
-    R-->>U: Email с кодом
-    API-->>PWA: 201 Created<br/>{message: "Код отправлен"}
+    API->>API: Generate 6-digit code
+    API->>DB: Save code + TTL
+    API->>R: Send email<br/>with verification code
+    R-->>U: Email with code
+    API-->>PWA: 201 Created<br/>{message: "Code sent"}
 
-    U->>PWA: Вводит 6-значный код
+    U->>PWA: Enters 6-digit code
     PWA->>API: POST /auth/verify<br/>{email, code}
-    API->>DB: Проверка кода + TTL
-    alt Код верный
+    API->>DB: Check code + TTL
+    alt Code is valid
         API->>DB: UPDATE is_verified = true
-        API->>API: Генерация JWT<br/>(access + refresh)
+        API->>API: Generate JWT<br/>(access + refresh)
         API-->>PWA: 200 OK<br/>{access_token, refresh_token}
-        PWA->>PWA: Сохранение токенов
-        PWA-->>U: Переход в приложение
-    else Код неверный / истёк
+        PWA->>PWA: Save tokens
+        PWA-->>U: Navigate to app
+    else Code is invalid / expired
         API-->>PWA: 400 Bad Request
-        PWA-->>U: Ошибка верификации
+        PWA-->>U: Verification error
     end
 ```
 
-### 3.2 Логин и получение токенов
+### 3.2 Login and Token Retrieval
 
 ```mermaid
 sequenceDiagram
-    participant U as Пользователь
-    participant PWA as PWA-клиент
+    participant U as User
+    participant PWA as PWA Client
     participant API as FastAPI
     participant DB as PostgreSQL
 
-    U->>PWA: Вводит email + password
+    U->>PWA: Enters email + password
     PWA->>API: POST /auth/login<br/>{email, password}
     API->>DB: SELECT user by email
     API->>API: bcrypt.verify(password, hash)
 
-    alt Успешно
-        API->>API: Генерация JWT<br/>(access: 15 мин, refresh: 30 дней)
+    alt Success
+        API->>API: Generate JWT<br/>(access: 15 min, refresh: 30 days)
         API-->>PWA: 200 OK<br/>{access_token, refresh_token}
-        PWA->>PWA: Сохранение токенов
-    else Неверные credentials
+        PWA->>PWA: Save tokens
+    else Invalid credentials
         API-->>PWA: 401 Unauthorized
     end
 
-    Note over PWA: При истечении access token
+    Note over PWA: When access token expires
     PWA->>API: POST /auth/refresh<br/>{refresh_token}
-    API->>API: Валидация refresh token
-    API->>API: Генерация нового access token
+    API->>API: Validate refresh token
+    API->>API: Generate new access token
     API-->>PWA: 200 OK<br/>{access_token}
 ```
 
-### 3.3 Начало голосовой сессии
+### 3.3 Starting a Voice Session
 
 ```mermaid
 sequenceDiagram
-    participant U as Пользователь
-    participant PWA as PWA-клиент
+    participant U as User
+    participant PWA as PWA Client
     participant API as FastAPI
     participant LK as LiveKit Server
     participant AG as LiveKit Agent Server
     participant DB as PostgreSQL
 
-    U->>PWA: Открывает приложение
+    U->>PWA: Opens the app
     PWA->>API: GET /sessions/history<br/>Authorization: Bearer {jwt}
-    API->>DB: SELECT прошлые сессии
-    API-->>PWA: История сессий
+    API->>DB: SELECT past sessions
+    API-->>PWA: Session history
 
-    U->>PWA: Нажимает "Начать разговор"
+    U->>PWA: Clicks "Start conversation"
     PWA->>API: POST /sessions/start<br/>Authorization: Bearer {jwt}
-    API->>DB: INSERT новая сессия
-    API->>API: Генерация LiveKit-токена<br/>(room, participant identity)
+    API->>DB: INSERT new session
+    API->>API: Generate LiveKit token<br/>(room, participant identity)
     API-->>PWA: {livekit_token, session_id}
 
-    PWA->>LK: Подключение к комнате<br/>(LiveKit Client SDK + token)
-    LK->>LK: Создание комнаты
-    LK->>AG: Dispatch: новая комната
+    PWA->>LK: Connect to room<br/>(LiveKit Client SDK + token)
+    LK->>LK: Create room
+    LK->>AG: Dispatch: new room
 
-    AG->>AG: Принятие job,<br/>запуск процесса агента
-    AG->>LK: Агент подключается<br/>к комнате как участник
-    AG->>DB: Загрузка промптов,<br/>конфигурации агента
+    AG->>AG: Accept job,<br/>spawn agent process
+    AG->>LK: Agent connects<br/>to room as participant
+    AG->>DB: Load prompts,<br/>agent configuration
 
-    LK-->>PWA: Агент подключён
-    PWA->>PWA: Активация микрофона
-    PWA-->>U: Готов к разговору
+    LK-->>PWA: Agent connected
+    PWA->>PWA: Activate microphone
+    PWA-->>U: Ready to talk
 ```
 
-### 3.4 Голосовой диалог (полный цикл реплики)
+### 3.4 Voice Dialog (Full Turn Cycle)
 
 ```mermaid
 sequenceDiagram
-    participant U as Пользователь
-    participant MIC as Микрофон
-    participant PWA as PWA-клиент
+    participant U as User
+    participant MIC as Microphone
+    participant PWA as PWA Client
     participant LK as LiveKit Server
     participant VAD as Silero VAD
     participant TD as Turn Detector
@@ -366,58 +366,58 @@ sequenceDiagram
     participant TTS as Inworld TTS
     participant DB as PostgreSQL
 
-    U->>MIC: Говорит
-    MIC->>PWA: Аудио (PCM)
-    PWA->>LK: WebRTC аудио (Opus)
-    LK->>VAD: Аудиопоток → агент
+    U->>MIC: Speaks
+    MIC->>PWA: Audio (PCM)
+    PWA->>LK: WebRTC audio (Opus)
+    LK->>VAD: Audio stream → agent
 
     rect rgb(240, 248, 255)
-        Note over VAD,STT: Фаза 1: Распознавание
-        VAD->>VAD: Обнаружена речь
-        VAD->>STT: Аудио → STT
-        STT-->>PWA: Промежуточный транскрипт<br/>(стриминг слов)
+        Note over VAD,STT: Phase 1: Recognition
+        VAD->>VAD: Speech detected
+        VAD->>STT: Audio → STT
+        STT-->>PWA: Interim transcript<br/>(streaming words)
     end
 
-    VAD->>TD: Пауза обнаружена
-    TD->>TD: Анализ: конец мысли?
+    VAD->>TD: Pause detected
+    TD->>TD: Analysis: end of thought?
 
-    alt Turn Detector: да, конец реплики
-        TD->>STT: Финализация
-    else Таймаут 3 сек: принудительно
-        TD->>STT: Принудительная финализация
+    alt Turn Detector: yes, end of turn
+        TD->>STT: Finalize
+    else Timeout 3 sec: forced
+        TD->>STT: Forced finalization
     end
 
-    STT-->>PWA: Финальный транскрипт<br/>+ sentiment score
-    STT->>DB: Сохранение транскрипта
+    STT-->>PWA: Final transcript<br/>+ sentiment score
+    STT->>DB: Save transcript
 
     rect rgb(255, 248, 240)
-        Note over RAG,LLM: Фаза 2: Генерация ответа
-        STT->>RAG: Текст → эмбеддинг → поиск
-        RAG->>RAG: Гибридный поиск<br/>(pgvector + tsvector)
-        RAG-->>LLM: Top-K фрагментов<br/>+ метаданные
+        Note over RAG,LLM: Phase 2: Response Generation
+        STT->>RAG: Text → embedding → search
+        RAG->>RAG: Hybrid search<br/>(pgvector + tsvector)
+        RAG-->>LLM: Top-K chunks<br/>+ metadata
 
-        Note over LLM: Контекст:<br/>транскрипт + sentiment +<br/>RAG + история + промпты
-        LLM-->>PWA: Стриминг текста<br/>(с ID источников)
-        LLM-->>TTS: Стриминг текста<br/>(параллельно)
+        Note over LLM: Context:<br/>transcript + sentiment +<br/>RAG + history + prompts
+        LLM-->>PWA: Text streaming<br/>(with source IDs)
+        LLM-->>TTS: Text streaming<br/>(in parallel)
     end
 
     rect rgb(240, 255, 240)
-        Note over TTS,LK: Фаза 3: Синтез речи
-        Note over TTS: Начинает ДО<br/>завершения LLM
-        TTS-->>LK: Стриминговое аудио
-        LK-->>PWA: WebRTC аудио
-        PWA-->>U: Звук из динамика
+        Note over TTS,LK: Phase 3: Speech Synthesis
+        Note over TTS: Starts BEFORE<br/>LLM finishes
+        TTS-->>LK: Streaming audio
+        LK-->>PWA: WebRTC audio
+        PWA-->>U: Speaker playback
     end
 
-    LLM->>DB: Сохранение ответа агента
+    LLM->>DB: Save agent response
 ```
 
-### 3.5 Текстовый диалог
+### 3.5 Text Dialog
 
 ```mermaid
 sequenceDiagram
-    participant U as Пользователь
-    participant PWA as PWA-клиент
+    participant U as User
+    participant PWA as PWA Client
     participant LK as LiveKit Server
     participant AG as LiveKit Agent
     participant RAG as pgvector
@@ -425,68 +425,68 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant API as FastAPI
 
-    U->>PWA: Набирает сообщение
-    PWA->>LK: Data channel:<br/>текстовое сообщение
-    LK->>AG: Текст → агент
+    U->>PWA: Types a message
+    PWA->>LK: Data channel:<br/>text message
+    LK->>AG: Text → agent
 
-    Note over AG: STT пропускается
+    Note over AG: STT skipped
 
-    AG->>RAG: Текст → эмбеддинг → поиск
-    RAG-->>AG: Top-K фрагментов
+    AG->>RAG: Text → embedding → search
+    RAG-->>AG: Top-K chunks
 
-    AG->>LLM: Контекст:<br/>текст + RAG + история
-    LLM-->>AG: Стриминг токенов
+    AG->>LLM: Context:<br/>text + RAG + history
+    LLM-->>AG: Token streaming
 
-    AG-->>LK: Data channel:<br/>стриминг ответа + ID источников
-    LK-->>PWA: Реактивное обновление чата
-    AG->>DB: Сохранение сообщений
+    AG-->>LK: Data channel:<br/>streaming response + source IDs
+    LK-->>PWA: Reactive chat update
+    AG->>DB: Save messages
 
-    Note over AG: TTS пропускается
+    Note over AG: TTS skipped
 
-    PWA->>PWA: Рендеринг ответа<br/>с иконками-источниками
+    PWA->>PWA: Render response<br/>with source icons
 
-    U->>PWA: Клик на иконку источника
+    U->>PWA: Click on source icon
     PWA->>API: GET /sources/{ids}
-    API->>DB: SELECT метаданные фрагментов
-    API-->>PWA: Полные метаданные
-    PWA-->>U: Попап с источниками:<br/>автор, книга, глава,<br/>страница, ссылка
+    API->>DB: SELECT chunk metadata
+    API-->>PWA: Full metadata
+    PWA-->>U: Source popup:<br/>author, book, chapter,<br/>page, link
 ```
 
-### 3.6 Переключение режимов: голос ↔ текст
+### 3.6 Mode Switching: Voice ↔ Text
 
-Оба режима работают через единый реалтайм-транспорт — LiveKit. Голосовой режим использует WebRTC аудиотреки, текстовый — data channel. Переключение происходит на стороне клиента: активация/деактивация аудиотреков. Клиент всегда подключён к комнате — переключение мгновенное. Единая история диалога в PostgreSQL — агент видит все реплики из обоих режимов.
+Both modes operate over a single real-time transport — LiveKit. Voice mode uses WebRTC audio tracks, text mode uses the data channel. Switching happens client-side: activating/deactivating audio tracks. The client is always connected to the room — switching is instant. A unified dialog history in PostgreSQL — the agent sees all messages from both modes.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Подключение: Открытие приложения
-    Подключение --> LiveKitRoom: Получение LiveKit-токена
+    [*] --> Connecting: Open the app
+    Connecting --> LiveKitRoom: Obtain LiveKit token
 
     state LiveKitRoom {
-        [*] --> ГолосовойРежим: По умолчанию
+        [*] --> VoiceMode: Default
 
-        state ГолосовойРежим {
-            [*] --> АудиоАктивно
-            АудиоАктивно: WebRTC аудиотреки активны
-            АудиоАктивно: VAD → STT → LLM → TTS pipeline
-            АудиоАктивно: Транскрипты в чате
+        state VoiceMode {
+            [*] --> AudioActive
+            AudioActive: WebRTC audio tracks active
+            AudioActive: VAD → STT → LLM → TTS pipeline
+            AudioActive: Transcripts in chat
         }
 
-        state ТекстовыйРежим {
-            [*] --> ДатаКанал
-            ДатаКанал: Аудиотреки отключены
-            ДатаКанал: Текст → Data Channel → Agent
-            ДатаКанал: Agent → LLM → Data Channel → Клиент
+        state TextMode {
+            [*] --> DataChannel
+            DataChannel: Audio tracks disabled
+            DataChannel: Text → Data Channel → Agent
+            DataChannel: Agent → LLM → Data Channel → Client
         }
 
-        ГолосовойРежим --> ТекстовыйРежим: Пользователь нажимает\n"Текстовый режим"\n(mute audio tracks)
-        ТекстовыйРежим --> ГолосовойРежим: Пользователь нажимает\n"Голосовой режим"\n(unmute audio tracks)
+        VoiceMode --> TextMode: User clicks\n"Text mode"\n(mute audio tracks)
+        TextMode --> VoiceMode: User clicks\n"Voice mode"\n(unmute audio tracks)
     }
 
     note right of LiveKitRoom
-        Клиент всегда подключён к комнате.
-        Переключение мгновенное — только
-        включение/выключение аудиотреков.
-        Единая история в PostgreSQL.
+        Client is always connected to the room.
+        Switching is instant — only
+        toggling audio tracks on/off.
+        Unified history in PostgreSQL.
     end note
 ```
 
@@ -494,40 +494,40 @@ stateDiagram-v2
 
 ## 4. Voice Pipeline
 
-### 4.1 Компоненты pipeline (внутренняя архитектура агента)
+### 4.1 Pipeline Components (Agent Internal Architecture)
 
 ```mermaid
 flowchart LR
-    subgraph INPUT["Вход"]
-        AUDIO["WebRTC<br/>аудиопоток"]
-        TEXT["Data Channel<br/>текст"]
+    subgraph INPUT["Input"]
+        AUDIO["WebRTC<br/>audio stream"]
+        TEXT["Data Channel<br/>text"]
     end
 
     subgraph AGENT["LiveKit Agent"]
-        subgraph VOICE_PATH["Голосовой путь"]
-            VAD["Silero VAD<br/>Детекция речи"]
+        subgraph VOICE_PATH["Voice Path"]
+            VAD["Silero VAD<br/>Speech Detection"]
             NC["Noise<br/>Cancellation"]
-            TD["Turn Detector<br/>Конец реплики"]
-            STT["STT-плагин<br/>(Deepgram)"]
+            TD["Turn Detector<br/>End of Turn"]
+            STT["STT Plugin<br/>(Deepgram)"]
         end
 
-        subgraph CORE["Ядро"]
+        subgraph CORE["Core"]
             EMO["Emotional<br/>Analyzer<br/>(Circumplex)"]
-            CTX["Context<br/>Manager<br/>(история)"]
+            CTX["Context<br/>Manager<br/>(history)"]
             RAG["RAG<br/>Engine<br/>(pgvector)"]
-            PROMPT["Prompt<br/>Builder<br/>(из БД)"]
+            PROMPT["Prompt<br/>Builder<br/>(from DB)"]
         end
 
-        subgraph LLM_CALL["LLM-вызов"]
-            LLM["LLM<br/>(через LiteLLM)"]
+        subgraph LLM_CALL["LLM Call"]
+            LLM["LLM<br/>(via LiteLLM)"]
         end
 
-        subgraph OUTPUT_VOICE["Голосовой выход"]
-            TTS["TTS-плагин<br/>(Inworld)"]
+        subgraph OUTPUT_VOICE["Voice Output"]
+            TTS["TTS Plugin<br/>(Inworld)"]
         end
 
-        subgraph OUTPUT_TEXT["Текстовый выход"]
-            DC_OUT["Data Channel<br/>ответ"]
+        subgraph OUTPUT_TEXT["Text Output"]
+            DC_OUT["Data Channel<br/>response"]
         end
 
         PROACTIVE["Proactive<br/>Timer"]
@@ -536,94 +536,94 @@ flowchart LR
 
     AUDIO --> NC --> VAD --> STT
     VAD --> TD
-    TD -->|"реплика завершена"| STT
-    TEXT -->|"текстовый режим"| CTX
+    TD -->|"turn completed"| STT
+    TEXT -->|"text mode"| CTX
 
-    STT -->|"транскрипт +<br/>sentiment"| EMO
-    STT -->|"текст"| RAG
-    STT -->|"текст"| CTX
+    STT -->|"transcript +<br/>sentiment"| EMO
+    STT -->|"text"| RAG
+    STT -->|"text"| CTX
 
     EMO -->|"valence/arousal"| PROMPT
-    RAG -->|"фрагменты +<br/>метаданные"| PROMPT
-    CTX -->|"история"| PROMPT
+    RAG -->|"chunks +<br/>metadata"| PROMPT
+    CTX -->|"history"| PROMPT
 
     PROMPT --> LLM
-    CRISIS -->|"перехват"| LLM
+    CRISIS -->|"intercept"| LLM
 
-    LLM -->|"голосовой режим"| TTS
-    LLM -->|"текст + ID источников"| DC_OUT
+    LLM -->|"voice mode"| TTS
+    LLM -->|"text + source IDs"| DC_OUT
 
-    TTS -->|"аудио"| OUTPUT_AUDIO["WebRTC<br/>аудио"]
+    TTS -->|"audio"| OUTPUT_AUDIO["WebRTC<br/>audio"]
 
-    PROACTIVE -->|"таймаут тишины"| PROMPT
+    PROACTIVE -->|"silence timeout"| PROMPT
 ```
 
-**Определение конца реплики (Turn Detection).** Двухуровневый подход:
+**End-of-turn detection (Turn Detection).** Two-level approach:
 
-- **Уровень 1 — Silero VAD.** Определяет наличие/отсутствие речи в аудиопотоке. Быстрый детектор, отсеивающий тишину и фоновый шум. Плагин LiveKit Agents (`livekit-agents[silero]`).
-- **Уровень 2 — Turn Detector.** Активируется при паузе. Анализирует контекст: завершил ли пользователь мысль или просто задумался. Настраиваемые параметры таймаутов и порогов уверенности.
+- **Level 1 — Silero VAD.** Detects speech presence/absence in the audio stream. A fast detector that filters out silence and background noise. LiveKit Agents plugin (`livekit-agents[silero]`).
+- **Level 2 — Turn Detector.** Activates on pause. Analyzes context: has the user finished their thought or just paused to think. Configurable timeout and confidence threshold parameters.
 
-Страховочный таймаут: если turn detector считает, что пользователь ещё не закончил, но тишина превышает порог (по умолчанию 3 секунды), реплика принудительно считается завершённой. Порог подлежит тюнингу — медицинский контекст предполагает более длинные паузы, чем клиентский сервис.
+Fallback timeout: if the turn detector considers the user has not finished, but silence exceeds the threshold (default 3 seconds), the turn is forced to be considered complete. The threshold requires tuning — medical context implies longer pauses than customer service.
 
-**Минимизация задержек.** Целевая задержка voice-to-voice (от окончания речи до начала ответа) — **~800 мс** при облачных STT/LLM/TTS. Приёмы:
+**Latency minimization.** Target voice-to-voice latency (from end of speech to start of response) — **~800 ms** with cloud STT/LLM/TTS. Techniques:
 
-- **Сквозной стриминг** — каждый компонент стримит данные следующему без ожидания завершения. TTS начинает синтез первых слов, пока LLM ещё генерирует остальные.
-- **Thinking sounds** — ненавязчивый фоновый звук во время обработки, уменьшающий субъективное восприятие паузы.
-- **TTS-филлеры** — при длительных операциях агент проговаривает фразу-заполнитель: «Секунду, проверю...», «Хм, дайте подумать...». Вставляется автоматически при превышении порога.
-- **Промпт-инжиниринг** — LLM использует разговорные элементы: короткие вводные («так», «значит»), мягкие паузы. TTS воспроизводит их как органичные элементы речи.
+- **End-to-end streaming** — each component streams data to the next without waiting for completion. TTS begins synthesizing the first words while the LLM is still generating the rest.
+- **Thinking sounds** — a subtle background sound during processing that reduces subjective perception of the pause.
+- **TTS fillers** — for lengthy operations, the agent speaks a filler phrase: "One moment, let me check...", "Hmm, let me think...". Inserted automatically when the threshold is exceeded.
+- **Prompt engineering** — the LLM uses conversational elements: short interjections ("so", "well then"), soft pauses. TTS renders them as natural speech elements.
 
-### 4.2 Обработка перебиваний
+### 4.2 Interruption Handling
 
-Пользователь может перебить агента в любой момент. При обнаружении входящей речи во время ответа текущая генерация (LLM + TTS) немедленно отменяется, pipeline переключается на приём нового ввода. LiveKit Agents поддерживает этот сценарий нативно (механизм interruptions).
+The user can interrupt the agent at any time. When incoming speech is detected during a response, the current generation (LLM + TTS) is immediately cancelled, and the pipeline switches to receiving new input. LiveKit Agents supports this scenario natively (interruptions mechanism).
 
-При ложном перебивании (после прерывания не распознано слов в течение таймаута) агент перегенерирует краткое продолжение или повторяет последние 1–2 предложения. Точное «продолжение с места» ненадёжно из-за буферизации аудио.
+On false interruption (no words recognized after interruption within a timeout), the agent regenerates a brief continuation or repeats the last 1–2 sentences. Exact "resume from where it left off" is unreliable due to audio buffering.
 
 ```mermaid
 stateDiagram-v2
     [*] --> listening
-    listening: Слушаю — агент ожидает речь
+    listening: Listening — agent awaits speech
 
-    listening --> recognizing: VAD — обнаружена речь
-    recognizing: Распознаю
-    recognizing --> processing: Turn Detector — конец реплики
-    processing: Обработка
-    processing --> responding: LLM начал генерацию
+    listening --> recognizing: VAD — speech detected
+    recognizing: Recognizing
+    recognizing --> processing: Turn Detector — end of turn
+    processing: Processing
+    processing --> responding: LLM started generation
 
     state responding {
         [*] --> llm_tts
-        llm_tts: LLM стримит → TTS синтезирует → аудио играет
+        llm_tts: LLM streams → TTS synthesizes → audio plays
     }
 
-    responding --> interruption: VAD — речь во время ответа
+    responding --> interruption: VAD — speech during response
 
     state interruption {
         [*] --> cancel
-        cancel: Немедленная отмена LLM + TTS
-        cancel --> wait_stt: Ожидание STT-результата
-        wait_stt --> check: Есть распознанные слова?
+        cancel: Immediate cancellation of LLM + TTS
+        cancel --> wait_stt: Waiting for STT result
+        wait_stt --> check: Are there recognized words?
     }
 
-    interruption --> recognizing: Да — новая реплика
-    interruption --> false_int: Нет — тишина превысила таймаут
+    interruption --> recognizing: Yes — new turn
+    interruption --> false_int: No — silence exceeded timeout
 
     state false_int {
         [*] --> regen
-        regen: Перегенерация краткого продолжения или повтор последних 1–2 предложений
+        regen: Regenerate brief continuation or repeat last 1–2 sentences
     }
 
-    false_int --> responding: Продолжение ответа
-    responding --> listening: Ответ завершён
+    false_int --> responding: Continue response
+    responding --> listening: Response complete
 ```
 
-### 4.3 Проактивные реплики
+### 4.3 Proactive Utterances
 
-После ответа запускается таймер тишины. Если пользователь не отвечает в течение порога (по умолчанию 15–20 секунд), агент инициирует продолжение:
+After a response, a silence timer starts. If the user does not reply within the threshold (default 15–20 seconds), the agent initiates a follow-up:
 
-- После короткой паузы: «Хотите, чтобы я объяснил подробнее?»
-- После длинной паузы: «Если нужно время подумать — это нормально. Я здесь.»
-- После обсуждения сложной темы: «Это непростая тема. Что вас больше всего беспокоит?»
+- After a short pause: "Would you like me to explain in more detail?"
+- After a long pause: "If you need time to think — that's okay. I'm here."
+- After discussing a complex topic: "This is a tough topic. What concerns you the most?"
 
-Конкретные фразы генерирует LLM на основе контекста, а не хардкодятся. Таймер сбрасывается при любой активности.
+Specific phrases are generated by the LLM based on context, not hardcoded. The timer resets on any activity.
 
 ```mermaid
 sequenceDiagram
@@ -632,58 +632,58 @@ sequenceDiagram
     participant LLM as LLM (LiteLLM)
     participant TTS as TTS
     participant LK as LiveKit Server
-    participant PWA as PWA-клиент
+    participant PWA as PWA Client
 
-    Note over AG: Агент завершил ответ
+    Note over AG: Agent finished response
 
-    AG->>TIMER: Запуск таймера<br/>(15-20 сек)
+    AG->>TIMER: Start timer<br/>(15-20 sec)
 
-    alt Пользователь заговорил
-        TIMER->>TIMER: Сброс таймера
-    else Таймер истёк — короткая пауза (15 сек)
-        TIMER->>AG: Событие: короткая пауза
-        AG->>LLM: Запрос проактивной реплики<br/>Контекст + флаг "proactive"<br/>+ эмоциональное состояние
-        LLM-->>AG: "Хотите, чтобы я<br/>объяснил подробнее?"
-        AG->>TTS: Синтез
-        TTS-->>LK: Аудио
-        LK-->>PWA: Воспроизведение
-        AG->>TIMER: Запуск нового таймера
-    else Таймер истёк — длинная пауза (45 сек)
-        TIMER->>AG: Событие: длинная пауза
-        AG->>LLM: Запрос мягкой реплики<br/>Контекст + "extended_silence"
-        LLM-->>AG: "Если нужно время<br/>подумать — это нормально."
-        AG->>TTS: Синтез
-        TTS-->>LK: Аудио
-        LK-->>PWA: Воспроизведение
+    alt User starts speaking
+        TIMER->>TIMER: Reset timer
+    else Timer expired — short pause (15 sec)
+        TIMER->>AG: Event: short pause
+        AG->>LLM: Request proactive utterance<br/>Context + "proactive" flag<br/>+ emotional state
+        LLM-->>AG: "Would you like me to<br/>explain in more detail?"
+        AG->>TTS: Synthesize
+        TTS-->>LK: Audio
+        LK-->>PWA: Playback
+        AG->>TIMER: Start new timer
+    else Timer expired — long pause (45 sec)
+        TIMER->>AG: Event: long pause
+        AG->>LLM: Request gentle utterance<br/>Context + "extended_silence"
+        LLM-->>AG: "If you need time to<br/>think — that's okay."
+        AG->>TTS: Synthesize
+        TTS-->>LK: Audio
+        LK-->>PWA: Playback
     end
 ```
 
-### 4.4 Кризисный протокол
+### 4.4 Crisis Protocol
 
 ```mermaid
 flowchart TD
-    INPUT["Реплика пользователя"] --> ANALYSIS
+    INPUT["User utterance"] --> ANALYSIS
 
-    subgraph ANALYSIS["Анализ на тревожные сигналы"]
-        CHECK1["Упоминание суицида /<br/>самоповреждения"]
-        CHECK2["Острые медицинские<br/>симптомы"]
-        CHECK3["Описание насилия /<br/>угрозы"]
+    subgraph ANALYSIS["Analysis for Warning Signals"]
+        CHECK1["Mention of suicide /<br/>self-harm"]
+        CHECK2["Acute medical<br/>symptoms"]
+        CHECK3["Description of violence /<br/>threats"]
     end
 
-    ANALYSIS -->|"Сигнал обнаружен"| CRISIS_MODE
-    ANALYSIS -->|"Нет сигналов"| NORMAL["Обычный pipeline<br/>(RAG → LLM → TTS)"]
+    ANALYSIS -->|"Signal detected"| CRISIS_MODE
+    ANALYSIS -->|"No signals"| NORMAL["Normal pipeline<br/>(RAG → LLM → TTS)"]
 
-    subgraph CRISIS_MODE["Кризисный протокол"]
+    subgraph CRISIS_MODE["Crisis Protocol"]
         direction TB
-        EMPATHY["1. Проявить эмпатию<br/>Не обесценивать состояние"]
-        SAFETY["2. Не ставить диагноз<br/>Не назначать лечение"]
-        HELP["3. Рекомендовать<br/>профессиональную помощь"]
-        CONTACTS["4. Предоставить контакты<br/>экстренных служб"]
+        EMPATHY["1. Show empathy<br/>Do not dismiss the state"]
+        SAFETY["2. Do not diagnose<br/>Do not prescribe treatment"]
+        HELP["3. Recommend<br/>professional help"]
+        CONTACTS["4. Provide emergency<br/>service contacts"]
         EMPATHY --> SAFETY --> HELP --> CONTACTS
     end
 
-    CRISIS_MODE --> LOG["Логирование<br/>срабатывания протокола"]
-    CRISIS_MODE --> RESPONSE["Фиксированный ответ<br/>(высший приоритет,<br/>не переопределяется контекстом)"]
+    CRISIS_MODE --> LOG["Log<br/>protocol activation"]
+    CRISIS_MODE --> RESPONSE["Fixed response<br/>(highest priority,<br/>not overridden by context)"]
 
     style CRISIS_MODE fill:#fff3f3,stroke:#ff6666
     style CHECK1 fill:#ffe0e0
@@ -691,48 +691,48 @@ flowchart TD
     style CHECK3 fill:#ffe0e0
 ```
 
-### 4.5 Шумоподавление
+### 4.5 Noise Cancellation
 
-Для улучшения качества распознавания в неидеальных условиях (кафе, улица, офис) используется аудиофильтр на входе pipeline. LiveKit Agents поддерживает плагин шумоподавления. Выбор конкретного решения определяется по результатам тестирования.
+To improve recognition quality in non-ideal conditions (cafe, street, office), an audio filter is used at the pipeline input. LiveKit Agents supports a noise cancellation plugin. The specific solution is determined based on testing results.
 
 ---
 
 ## 5. RAG Pipeline
 
-### 5.1 Загрузка материалов (Ingestion)
+### 5.1 Material Ingestion
 
-Экспертные материалы проходят пять этапов обработки:
+Expert materials go through five processing stages:
 
-1. **Извлечение текста** из исходных форматов: PDF, EPUB, DOCX, аудио (через транскрибацию).
-2. **Семантическое чанкирование** — разбиение по смысловым блокам (абзацы, разделы), а не по фиксированному количеству токенов. Предотвращает разрыв причинно-следственных связей — важно для медицинского контента, где рекомендации и противопоказания не должны разделяться.
-3. **Обогащение метаданными** — `source_type` (книга, видео, подкаст, статья, пост), `title`, `author`, `url`, `section` (глава, таймкод), `page_range`, `language`, `tags`.
-4. **Генерация эмбеддингов** — через embedding-модель (варианты: OpenAI text-embedding-3-small, Cohere embed-v4, open-source через Ollama). Модель подключается через LiteLLM.
-5. **Загрузка в PostgreSQL** — эмбеддинги (vector-столбец) + метаданные + HNSW-индекс для ANN-поиска.
+1. **Text extraction** from source formats: PDF, EPUB, DOCX, audio (via transcription).
+2. **Semantic chunking** — splitting by semantic blocks (paragraphs, sections), not by fixed token count. Prevents breaking cause-and-effect relationships — important for medical content where recommendations and contraindications must not be separated.
+3. **Metadata enrichment** — `source_type` (book, video, podcast, article, post), `title`, `author`, `url`, `section` (chapter, timestamp), `page_range`, `language`, `tags`.
+4. **Embedding generation** — via an embedding model (options: OpenAI text-embedding-3-small, Cohere embed-v4, open-source via Ollama). The model is connected through LiteLLM.
+5. **Loading into PostgreSQL** — embeddings (vector column) + metadata + HNSW index for ANN search.
 
 ```mermaid
 flowchart LR
-    subgraph SOURCES["Исходные материалы"]
+    subgraph SOURCES["Source Materials"]
         PDF["PDF / EPUB /<br/>DOCX"]
-        AUDIO["Подкасты /<br/>Интервью"]
-        WEB["Статьи /<br/>Посты"]
+        AUDIO["Podcasts /<br/>Interviews"]
+        WEB["Articles /<br/>Posts"]
     end
 
-    subgraph EXTRACT["Извлечение текста"]
-        PARSER["Парсеры<br/>(PDF, EPUB, DOCX)"]
-        TRANSCRIBE["Транскрибация<br/>(аудио → текст)"]
-        SCRAPER["Извлечение<br/>(HTML → текст)"]
+    subgraph EXTRACT["Text Extraction"]
+        PARSER["Parsers<br/>(PDF, EPUB, DOCX)"]
+        TRANSCRIBE["Transcription<br/>(audio → text)"]
+        SCRAPER["Extraction<br/>(HTML → text)"]
     end
 
-    subgraph PROCESS["Обработка"]
-        CHUNK["Семантическое<br/>чанкирование<br/>(по смысловым блокам)"]
-        META["Обогащение метаданными<br/>source_type, title, author,<br/>url, section, page_range,<br/>language, tags"]
-        EMBED["Генерация эмбеддингов<br/>(embedding-модель<br/>через LiteLLM)"]
+    subgraph PROCESS["Processing"]
+        CHUNK["Semantic<br/>Chunking<br/>(by semantic blocks)"]
+        META["Metadata Enrichment<br/>source_type, title, author,<br/>url, section, page_range,<br/>language, tags"]
+        EMBED["Embedding Generation<br/>(embedding model<br/>via LiteLLM)"]
     end
 
-    subgraph STORE["Хранение"]
+    subgraph STORE["Storage"]
         PG["PostgreSQL<br/>+ pgvector"]
-        IDX["HNSW-индекс<br/>для ANN-поиска"]
-        FTS["tsvector<br/>для полнотекстового<br/>поиска"]
+        IDX["HNSW Index<br/>for ANN search"]
+        FTS["tsvector<br/>for full-text<br/>search"]
     end
 
     PDF --> PARSER
@@ -749,163 +749,163 @@ flowchart LR
     PG --> FTS
 ```
 
-### 5.2 Поиск при запросе (Query)
+### 5.2 Query-Time Search
 
-При каждом обращении к LLM:
+On each LLM call:
 
-1. Текст последней реплики (или нескольких) преобразуется в эмбеддинг той же моделью.
-2. PostgreSQL выполняет гибридный поиск: семантическая близость (cosine distance, pgvector) + полнотекстовый (tsvector) + фильтры по метаданным (язык, тип материала).
-3. Top-K релевантных фрагментов (K = 3–5, настраивается) включаются в контекст LLM с метаданными источников.
+1. The text of the latest utterance (or several) is converted to an embedding using the same model.
+2. PostgreSQL performs a hybrid search: semantic similarity (cosine distance, pgvector) + full-text (tsvector) + metadata filters (language, material type).
+3. Top-K relevant chunks (K = 3–5, configurable) are included in the LLM context with source metadata.
 
 ```mermaid
 flowchart LR
-    INPUT["Реплика<br/>пользователя"] --> Q_EMBED["Эмбеддинг<br/>запроса"]
+    INPUT["User<br/>utterance"] --> Q_EMBED["Query<br/>Embedding"]
 
     Q_EMBED --> SEARCH
 
-    subgraph SEARCH["Гибридный поиск (PostgreSQL)"]
+    subgraph SEARCH["Hybrid Search (PostgreSQL)"]
         direction TB
-        VEC["Векторный поиск<br/>(cosine distance<br/>pgvector)"]
-        FTS["Полнотекстовый<br/>поиск<br/>(tsvector)"]
-        FILTER["Фильтры<br/>(язык, тип,<br/>тематика)"]
-        RANK["Ранжирование<br/>и дедупликация"]
+        VEC["Vector Search<br/>(cosine distance<br/>pgvector)"]
+        FTS["Full-Text<br/>Search<br/>(tsvector)"]
+        FILTER["Filters<br/>(language, type,<br/>topic)"]
+        RANK["Ranking<br/>and Deduplication"]
 
         VEC --> RANK
         FTS --> RANK
         FILTER --> RANK
     end
 
-    SEARCH --> TOPK["Top-K фрагментов<br/>(K = 3-5)"]
-    TOPK --> CONTEXT["Контекст LLM"]
+    SEARCH --> TOPK["Top-K chunks<br/>(K = 3-5)"]
+    TOPK --> CONTEXT["LLM Context"]
 
-    CONTEXT --> LLM_IN["LLM получает:<br/>• Транскрипт<br/>• Эмоции (valence/arousal)<br/>• RAG-фрагменты с метаданными<br/>• История диалога<br/>• Системный промпт"]
+    CONTEXT --> LLM_IN["LLM receives:<br/>• Transcript<br/>• Emotions (valence/arousal)<br/>• RAG chunks with metadata<br/>• Dialog history<br/>• System prompt"]
 ```
 
-### 5.3 Атрибуция источников (от RAG до попапа)
+### 5.3 Source Attribution (from RAG to Popup)
 
 ```mermaid
 sequenceDiagram
     participant RAG as pgvector
     participant LLM as LLM
     participant AG as Agent
-    participant PWA as PWA-клиент
+    participant PWA as PWA Client
     participant API as FastAPI
     participant DB as PostgreSQL
 
-    Note over RAG: Поиск по запросу
-    RAG->>LLM: Фрагменты с метаданными:<br/>chunk_id, source_type,<br/>title, author, section
+    Note over RAG: Search by query
+    RAG->>LLM: Chunks with metadata:<br/>chunk_id, source_type,<br/>title, author, section
 
-    Note over LLM: Промпт инструктирует<br/>формировать двухслойный ответ
+    Note over LLM: Prompt instructs to<br/>form a two-layer response
 
-    LLM->>AG: Голосовая часть:<br/>"Как пишет доктор Иванов<br/>в своей книге..."
+    LLM->>AG: Voice part:<br/>"As Dr. Ivanov writes<br/>in his book..."
 
-    LLM->>AG: Текстовая часть:<br/>Тезис 1 [chunk_ids: 42, 57]<br/>Тезис 2 [chunk_ids: 23]
+    LLM->>AG: Text part:<br/>Thesis 1 [chunk_ids: 42, 57]<br/>Thesis 2 [chunk_ids: 23]
 
-    AG->>PWA: Data channel: текст ответа<br/>+ массивы chunk_ids на тезис
-    PWA->>PWA: Рендеринг: каждый тезис<br/>с иконками-индикаторами
+    AG->>PWA: Data channel: response text<br/>+ chunk_ids arrays per thesis
+    PWA->>PWA: Render: each thesis<br/>with indicator icons
 
-    Note over PWA: Пользователь кликает<br/>на иконку источника
+    Note over PWA: User clicks<br/>on source icon
 
     PWA->>API: GET /sources/42,57
-    API->>DB: SELECT метаданные<br/>WHERE id IN (42, 57)
-    API-->>PWA: [{<br/>  source_type: "book",<br/>  title: "Основы нутрициологии",<br/>  author: "Иванов А.В.",<br/>  section: "Глава 3",<br/>  page_range: "45-48",<br/>  url: null<br/>}, ...]
+    API->>DB: SELECT metadata<br/>WHERE id IN (42, 57)
+    API-->>PWA: [{<br/>  source_type: "book",<br/>  title: "Fundamentals of Nutrition",<br/>  author: "Ivanov A.V.",<br/>  section: "Chapter 3",<br/>  page_range: "45-48",<br/>  url: null<br/>}, ...]
 
-    PWA-->>PWA: Попап с полной<br/>информацией об источниках
+    PWA-->>PWA: Popup with full<br/>source information
 ```
 
 ---
 
-## 6. Аутентификация и токены
+## 6. Authentication and Tokens
 
-### 6.1 Жизненный цикл JWT
+### 6.1 JWT Lifecycle
 
 ```mermaid
 sequenceDiagram
-    participant PWA as PWA-клиент
+    participant PWA as PWA Client
     participant API as FastAPI
     participant DB as PostgreSQL
 
-    Note over PWA,API: Логин
+    Note over PWA,API: Login
     PWA->>API: POST /auth/login
-    API->>DB: Проверка credentials
-    API->>API: Генерация JWT
-    API-->>PWA: access_token (15 мин)<br/>refresh_token (30 дней)
+    API->>DB: Verify credentials
+    API->>API: Generate JWT
+    API-->>PWA: access_token (15 min)<br/>refresh_token (30 days)
 
-    Note over PWA: Обычные запросы
-    loop Каждый запрос
+    Note over PWA: Regular requests
+    loop Every request
         PWA->>API: GET /sessions/history<br/>Authorization: Bearer {access_token}
-        API->>API: Валидация JWT (HS256)
-        API-->>PWA: 200 OK + данные
+        API->>API: Validate JWT (HS256)
+        API-->>PWA: 200 OK + data
     end
 
-    Note over PWA: Access token истёк
+    Note over PWA: Access token expired
     PWA->>API: GET /some-endpoint
     API-->>PWA: 401 Unauthorized
 
     PWA->>API: POST /auth/refresh<br/>{refresh_token}
-    API->>API: Валидация refresh token
-    alt Refresh token валиден
-        API->>API: Новый access_token
+    API->>API: Validate refresh token
+    alt Refresh token is valid
+        API->>API: New access_token
         API-->>PWA: {access_token}
-        PWA->>PWA: Повтор исходного запроса
-    else Refresh token истёк
+        PWA->>PWA: Retry original request
+    else Refresh token expired
         API-->>PWA: 401 Unauthorized
-        PWA-->>PWA: Редирект на логин
+        PWA-->>PWA: Redirect to login
     end
 ```
 
-### 6.2 Генерация LiveKit-токена
+### 6.2 LiveKit Token Generation
 
 ```mermaid
 sequenceDiagram
-    participant PWA as PWA-клиент
+    participant PWA as PWA Client
     participant API as FastAPI
     participant LK as LiveKit Server
     participant AG as Agent Server
 
     PWA->>API: POST /sessions/start<br/>Authorization: Bearer {jwt}
-    API->>API: Валидация JWT → user_id
-    API->>API: Создание room_name<br/>(session_{uuid})
-    API->>API: Генерация LiveKit-токена<br/>с правами:<br/>• can_publish (audio)<br/>• can_subscribe<br/>• can_publish_data<br/>• room: room_name<br/>• identity: user_{id}
+    API->>API: Validate JWT → user_id
+    API->>API: Create room_name<br/>(session_{uuid})
+    API->>API: Generate LiveKit token<br/>with permissions:<br/>• can_publish (audio)<br/>• can_subscribe<br/>• can_publish_data<br/>• room: room_name<br/>• identity: user_{id}
     API-->>PWA: {livekit_token, room_name}
 
     PWA->>LK: connect(url, token)
-    LK->>LK: Валидация токена<br/>(API key + secret)
-    LK->>LK: Создание комнаты
-    LK-->>PWA: Подключён
+    LK->>LK: Validate token<br/>(API key + secret)
+    LK->>LK: Create room
+    LK-->>PWA: Connected
 
     LK->>AG: Dispatch job<br/>(room_name)
-    AG->>LK: Агент подключается<br/>как участник
+    AG->>LK: Agent connects<br/>as participant
 ```
 
 ---
 
-## 7. Эмоциональная модель
+## 7. Emotional Model
 
-### 7.1 Circumplex data flow
+### 7.1 Circumplex Data Flow
 
-**Реализация (MVP) — гибридный подход:**
+**Implementation (MVP) — hybrid approach:**
 
-- **Быстрый сигнал** — sentiment score от Deepgram (-1..1) для каждого сегмента транскрипта. Поступает без дополнительной задержки как часть STT-результата.
-- **LLM-интерпретация** — LLM инструктируется через системный промпт оценивать состояние в двумерном пространстве (valence/arousal) на основе текста, sentiment score, контекста предыдущих реплик и динамики (тренд). Не требует отдельного ML-классификатора — работает в рамках существующего LLM-вызова.
+- **Fast signal** — sentiment score from Deepgram (-1..1) for each transcript segment. Arrives with no additional latency as part of the STT result.
+- **LLM interpretation** — the LLM is instructed via the system prompt to assess the state in a two-dimensional space (valence/arousal) based on text, sentiment score, context of previous utterances, and dynamics (trend). Does not require a separate ML classifier — operates within the existing LLM call.
 
 ```mermaid
 flowchart TB
-    subgraph INPUT["Входные сигналы"]
-        STT_SENT["Sentiment от Deepgram<br/>(-1..1)<br/>Быстрый сигнал"]
-        TEXT["Текст реплики"]
-        HISTORY["История реплик<br/>(тренд)"]
+    subgraph INPUT["Input Signals"]
+        STT_SENT["Sentiment from Deepgram<br/>(-1..1)<br/>Fast signal"]
+        TEXT["Utterance text"]
+        HISTORY["Utterance history<br/>(trend)"]
     end
 
-    subgraph ANALYSIS["Анализ (в рамках LLM-вызова)"]
-        INTERPRET["LLM-интерпретация:<br/>Текст + sentiment + контекст<br/>→ Valence + Arousal"]
-        TREND["Вычисление тренда:<br/>скользящее среднее<br/>за N реплик"]
+    subgraph ANALYSIS["Analysis (within LLM call)"]
+        INTERPRET["LLM interpretation:<br/>Text + sentiment + context<br/>→ Valence + Arousal"]
+        TREND["Trend calculation:<br/>moving average<br/>over N utterances"]
     end
 
-    subgraph ADAPTATION["Адаптация ответа"]
-        TONE["Тон голоса<br/>(TTS-параметры)"]
-        STYLE["Стиль ответа<br/>(промпт-модификатор)"]
-        LENGTH["Длина и сложность<br/>ответа"]
+    subgraph ADAPTATION["Response Adaptation"]
+        TONE["Voice tone<br/>(TTS parameters)"]
+        STYLE["Response style<br/>(prompt modifier)"]
+        LENGTH["Response length<br/>and complexity"]
     end
 
     STT_SENT --> INTERPRET
@@ -918,165 +918,165 @@ flowchart TB
     TREND --> STYLE
     INTERPRET --> LENGTH
 
-    subgraph PERSIST["Персистенция"]
-        DB["PostgreSQL:<br/>valence, arousal,<br/>raw_sentiment<br/>для каждой реплики"]
+    subgraph PERSIST["Persistence"]
+        DB["PostgreSQL:<br/>valence, arousal,<br/>raw_sentiment<br/>per utterance"]
     end
 
     INTERPRET --> DB
 ```
 
-### 7.2 Квадранты Circumplex
+### 7.2 Circumplex Quadrants
 
 ```mermaid
 quadrantChart
-    title Модель Circumplex: эмоциональные состояния
-    x-axis "Негативная валентность" --> "Позитивная валентность"
-    y-axis "Низкое возбуждение" --> "Высокое возбуждение"
-    quadrant-1 "Энтузиазм, радость"
-    quadrant-2 "Паника, тревога"
-    quadrant-3 "Апатия, подавленность"
-    quadrant-4 "Спокойствие, удовлетворение"
-    "Паническая атака": [0.15, 0.9]
-    "Тревога": [0.25, 0.75]
-    "Гнев": [0.1, 0.85]
-    "Грусть": [0.2, 0.3]
-    "Апатия": [0.15, 0.15]
-    "Скука": [0.35, 0.2]
-    "Спокойствие": [0.7, 0.3]
-    "Удовлетворение": [0.75, 0.4]
-    "Радость": [0.8, 0.75]
-    "Энтузиазм": [0.85, 0.85]
-    "Интерес": [0.65, 0.65]
-    "Нейтральное": [0.5, 0.5]
+    title Circumplex Model: Emotional States
+    x-axis "Negative Valence" --> "Positive Valence"
+    y-axis "Low Arousal" --> "High Arousal"
+    quadrant-1 "Enthusiasm, Joy"
+    quadrant-2 "Panic, Anxiety"
+    quadrant-3 "Apathy, Depression"
+    quadrant-4 "Calm, Contentment"
+    "Panic attack": [0.15, 0.9]
+    "Anxiety": [0.25, 0.75]
+    "Anger": [0.1, 0.85]
+    "Sadness": [0.2, 0.3]
+    "Apathy": [0.15, 0.15]
+    "Boredom": [0.35, 0.2]
+    "Calm": [0.7, 0.3]
+    "Contentment": [0.75, 0.4]
+    "Joy": [0.8, 0.75]
+    "Enthusiasm": [0.85, 0.85]
+    "Interest": [0.65, 0.65]
+    "Neutral": [0.5, 0.5]
 ```
 
-### 7.3 Трекинг эмоционального фона сессии
+### 7.3 Session Emotional Background Tracking
 
-Помимо текущей оценки, в контексте LLM поддерживается скользящий эмоциональный фон:
+Beyond the current assessment, a rolling emotional background is maintained in the LLM context:
 
-- Средние значения valence/arousal за последние N реплик
-- Тренд (улучшение или ухудшение)
-- Моменты резких изменений
+- Average valence/arousal values over the last N utterances
+- Trend (improving or worsening)
+- Points of sharp change
 
-Это позволяет LLM учитывать динамику: если пользователь начал позитивно, но состояние ухудшается — агент реагирует на тренд, а не только на последнюю реплику.
-
----
-
-## 8. Управление сессиями и контекстом
-
-### Единый контекст диалога
-
-Агрегатор контекста в LiveKit Agents автоматически собирает реплики пользователя (после STT) и ответы агента (после TTS) в единый контекстный объект. Все сообщения — текстовые и транскрибированные голосовые — хранятся в одной цепочке в формате, совместимом с OpenAI Messages API.
-
-### Контекстное окно и история
-
-Длина контекста ограничена размером окна LLM. Стратегии для длинных сессий:
-
-- **Суммаризация** — старые сообщения сжимаются в краткое саммари
-- **Скользящее окно** — последние N реплик + саммари предыдущих
-- **Гибридный подход** — комбинация двух стратегий
-
-Выбор конкретной стратегии — задача этапа реализации.
-
-### Персистентность
-
-Каждая сессия записывается в PostgreSQL:
-- Полная история сообщений (текст, источник — голос или текст, временная метка)
-- Эмоциональные данные для каждой реплики (valence, arousal, raw sentiment)
-- Метаданные использованных RAG-фрагментов
-
-При повторном подключении контекст предыдущих сессий может загружаться (в суммаризированном виде) для долгосрочной памяти агента.
+This allows the LLM to account for dynamics: if the user started positively but the state is worsening, the agent reacts to the trend, not just the latest utterance.
 
 ---
 
-## 9. Жизненный цикл агента
+## 8. Session and Context Management
 
-### 9.1 LiveKit Agent Server: job lifecycle
+### Unified Dialog Context
+
+The context aggregator in LiveKit Agents automatically collects user utterances (after STT) and agent responses (after TTS) into a unified context object. All messages — text and transcribed voice — are stored in a single chain in a format compatible with the OpenAI Messages API.
+
+### Context Window and History
+
+Context length is limited by the LLM window size. Strategies for long sessions:
+
+- **Summarization** — older messages are compressed into a brief summary
+- **Sliding window** — the last N utterances + summary of previous ones
+- **Hybrid approach** — a combination of both strategies
+
+The specific strategy choice is determined at the implementation stage.
+
+### Persistence
+
+Each session is recorded in PostgreSQL:
+- Full message history (text, source — voice or text, timestamp)
+- Emotional data for each utterance (valence, arousal, raw sentiment)
+- Metadata of used RAG chunks
+
+On reconnection, context from previous sessions can be loaded (in summarized form) for long-term agent memory.
+
+---
+
+## 9. Agent Lifecycle
+
+### 9.1 LiveKit Agent Server: Job Lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> registering: Запуск контейнера agent
-    registering: Регистрация в LiveKit Server
-    registering --> idle: Подключение установлено
-    idle: Ожидание dispatch
+    [*] --> registering: Agent container starts
+    registering: Registering with LiveKit Server
+    registering --> idle: Connection established
+    idle: Awaiting dispatch
 
-    idle --> job: LiveKit dispatch job (новая комната)
+    idle --> job: LiveKit dispatch job (new room)
 
     state job {
         [*] --> spawn
-        spawn: Отдельный Python-процесс
-        spawn --> load_cfg: Загрузка промптов из PostgreSQL
-        load_cfg --> connect: Подключение к комнате
-        connect --> wait_user: Ожидание пользователя
-        wait_user --> active: Пользователь подключён
+        spawn: Separate Python process
+        spawn --> load_cfg: Load prompts from PostgreSQL
+        load_cfg --> connect: Connect to room
+        connect --> wait_user: Awaiting user
+        wait_user --> active: User connected
     }
 
     state active {
         [*] --> pipeline
-        pipeline: Voice/Text Pipeline — обработка реплик, RAG, LLM, TTS
+        pipeline: Voice/Text Pipeline — processing utterances, RAG, LLM, TTS
     }
 
-    active --> cleanup: Пользователь отключился или shutdown()
+    active --> cleanup: User disconnected or shutdown()
 
     state cleanup {
         [*] --> drain
         drain: Drain pending speech (graceful)
         drain --> save
-        save: Сохранение состояния сессии в PostgreSQL
+        save: Save session state to PostgreSQL
         save --> disconnect
-        disconnect: Отключение от комнаты
+        disconnect: Disconnect from room
     }
 
-    cleanup --> idle: Процесс завершён, сервер готов
-    cleanup --> [*]: Сервер выключается
+    cleanup --> idle: Process finished, server ready
+    cleanup --> [*]: Server shutting down
 ```
 
-### 9.2 Graceful shutdown при деплое
+### 9.2 Graceful Shutdown During Deployment
 
 ```mermaid
 sequenceDiagram
-    participant DEPLOY as Деплой (новая версия)
+    participant DEPLOY as Deploy (new version)
     participant AS as Agent Server
-    participant JOB1 as Job 1 (активная сессия)
-    participant JOB2 as Job 2 (активная сессия)
+    participant JOB1 as Job 1 (active session)
+    participant JOB2 as Job 2 (active session)
     participant LK as LiveKit Server
     participant DB as PostgreSQL
 
     DEPLOY->>AS: SIGTERM
 
-    Note over AS: Graceful shutdown начат
+    Note over AS: Graceful shutdown started
 
-    AS->>AS: Прекращение приёма<br/>новых job'ов
-    AS->>LK: Статус: draining
+    AS->>AS: Stop accepting<br/>new jobs
+    AS->>LK: Status: draining
 
-    par Завершение активных сессий
+    par Completing active sessions
         AS->>JOB1: Shutdown signal
         JOB1->>JOB1: Drain pending speech
-        JOB1->>DB: Сохранение состояния
-        JOB1->>LK: Отключение от комнаты
-        JOB1-->>AS: Завершён
+        JOB1->>DB: Save state
+        JOB1->>LK: Disconnect from room
+        JOB1-->>AS: Completed
 
     and
         AS->>JOB2: Shutdown signal
         JOB2->>JOB2: Drain pending speech
-        JOB2->>DB: Сохранение состояния
-        JOB2->>LK: Отключение от комнаты
-        JOB2-->>AS: Завершён
+        JOB2->>DB: Save state
+        JOB2->>LK: Disconnect from room
+        JOB2-->>AS: Completed
     end
 
-    Note over AS: Все job'ы завершены<br/>(или drain_timeout истёк)
+    Note over AS: All jobs completed<br/>(or drain_timeout expired)
 
     AS->>AS: Cleanup
-    AS-->>DEPLOY: Процесс завершён
+    AS-->>DEPLOY: Process finished
 
-    DEPLOY->>DEPLOY: Запуск нового контейнера
+    DEPLOY->>DEPLOY: Start new container
 ```
 
 ---
 
-## 10. База данных
+## 10. Database
 
-### 10.1 ER-диаграмма
+### 10.1 ER Diagram
 
 ```mermaid
 erDiagram
@@ -1108,11 +1108,11 @@ erDiagram
         string role "user | assistant"
         string mode "voice | text"
         text content
-        text voice_transcript "если голос"
-        float sentiment_raw "от Deepgram"
+        text voice_transcript "if voice"
+        float sentiment_raw "from Deepgram"
         float valence
         float arousal
-        jsonb source_ids "ID RAG-фрагментов"
+        jsonb source_ids "RAG chunk IDs"
         timestamp created_at
     }
 
@@ -1131,10 +1131,10 @@ erDiagram
         uuid id PK
         uuid source_id FK
         text content
-        string section "глава, раздел, таймкод"
+        string section "chapter, section, timestamp"
         string page_range
         vector embedding "pgvector"
-        tsvector search_vector "полнотекстовый"
+        tsvector search_vector "full-text"
         integer token_count
         timestamp created_at
     }
@@ -1160,64 +1160,64 @@ erDiagram
         timestamp created_at
     }
 
-    users ||--o{ sessions : "имеет"
-    sessions ||--o{ messages : "содержит"
-    knowledge_sources ||--o{ knowledge_chunks : "разбит на"
+    users ||--o{ sessions : "has"
+    sessions ||--o{ messages : "contains"
+    knowledge_sources ||--o{ knowledge_chunks : "split into"
 ```
 
 ---
 
-## 11. Замена провайдеров
+## 11. Provider Replacement
 
-### Процесс замены STT
+### STT Replacement Process
 
-1. Убедиться, что новый провайдер поддерживается LiveKit Agents (нативно: Deepgram, Google, Azure, AssemblyAI, Groq и другие).
-2. Добавить API-ключ в переменные окружения контейнера agent.
-3. Сменить плагин в конфигурации AgentSession.
+1. Verify the new provider is supported by LiveKit Agents (natively: Deepgram, Google, Azure, AssemblyAI, Groq, and others).
+2. Add the API key to the agent container environment variables.
+3. Switch the plugin in the AgentSession configuration.
 
-Не требует изменений: логика pipeline, контекст, LLM, TTS, RAG, БД.
+No changes required: pipeline logic, context, LLM, TTS, RAG, DB.
 
-Особенность: если новый STT не предоставляет sentiment-анализ (как Deepgram), быстрый эмоциональный сигнал не будет поступать. LLM-интерпретация эмоций продолжит работать на основе текста и контекста.
+Note: if the new STT does not provide sentiment analysis (like Deepgram does), the fast emotional signal will not be available. LLM-based emotion interpretation will continue to work based on text and context.
 
-### Процесс замены LLM
+### LLM Replacement Process
 
-1. Добавить API-ключ в переменные окружения контейнера litellm.
-2. Обновить `litellm.yaml` (добавить/заменить запись).
-3. Перезапустить контейнер litellm.
+1. Add the API key to the litellm container environment variables.
+2. Update `litellm.yaml` (add/replace the entry).
+3. Restart the litellm container.
 
-Не требует изменений: код агента, STT/TTS, pipeline, БД. Через LiteLLM можно подключить self-hosted модели (Ollama, vLLM) по локальному адресу.
+No changes required: agent code, STT/TTS, pipeline, DB. Through LiteLLM, self-hosted models (Ollama, vLLM) can be connected via a local address.
 
-### Процесс замены TTS
+### TTS Replacement Process
 
-1. Убедиться, что провайдер поддерживается LiveKit Agents (нативно: ElevenLabs, Cartesia, Google, Azure, PlayHT, Deepgram и другие).
-2. Добавить API-ключ в переменные окружения контейнера agent.
-3. Сменить плагин в конфигурации AgentSession.
+1. Verify the provider is supported by LiveKit Agents (natively: ElevenLabs, Cartesia, Google, Azure, PlayHT, Deepgram, and others).
+2. Add the API key to the agent container environment variables.
+3. Switch the plugin in the AgentSession configuration.
 
-Не требует изменений: логика pipeline, STT, LLM, RAG, БД.
+No changes required: pipeline logic, STT, LLM, RAG, DB.
 
-### Неподдерживаемый провайдер
+### Unsupported Provider
 
-Для STT/TTS: реализовать кастомный плагин, имплементирующий стандартный интерфейс LiveKit Agents. Объём — один модуль, оборачивающий API провайдера. Для LLM: добавить кастомный провайдер в LiteLLM (большинство уже поддерживаются).
+For STT/TTS: implement a custom plugin that implements the standard LiveKit Agents interface. Scope — a single module wrapping the provider API. For LLM: add a custom provider to LiteLLM (most are already supported).
 
 ```mermaid
 flowchart TD
-    START["Решение о замене провайдера"]
+    START["Decision to replace provider"]
 
-    START --> TYPE{Какой компонент?}
+    START --> TYPE{Which component?}
 
-    TYPE -->|"STT"| STT_CHECK{"Есть нативный<br/>LiveKit-плагин?"}
-    TYPE -->|"LLM"| LLM_CHECK{"Поддерживается<br/>LiteLLM?"}
-    TYPE -->|"TTS"| TTS_CHECK{"Есть нативный<br/>LiveKit-плагин?"}
+    TYPE -->|"STT"| STT_CHECK{"Native LiveKit<br/>plugin available?"}
+    TYPE -->|"LLM"| LLM_CHECK{"Supported<br/>by LiteLLM?"}
+    TYPE -->|"TTS"| TTS_CHECK{"Native LiveKit<br/>plugin available?"}
 
-    STT_CHECK -->|"Да"| STT_NATIVE["1. Добавить API-ключ в .env<br/>2. Сменить плагин в AgentSession<br/>3. Перезапустить контейнер agent"]
-    STT_CHECK -->|"Нет"| STT_CUSTOM["1. Написать кастомный плагин<br/>(реализация STT-интерфейса)<br/>2. Добавить API-ключ в .env<br/>3. Перезапустить контейнер agent"]
+    STT_CHECK -->|"Yes"| STT_NATIVE["1. Add API key to .env<br/>2. Switch plugin in AgentSession<br/>3. Restart agent container"]
+    STT_CHECK -->|"No"| STT_CUSTOM["1. Write custom plugin<br/>(implement STT interface)<br/>2. Add API key to .env<br/>3. Restart agent container"]
 
-    LLM_CHECK -->|"Да"| LLM_NATIVE["1. Добавить API-ключ в .env<br/>2. Обновить litellm.yaml<br/>3. Перезапустить контейнер litellm"]
-    LLM_CHECK -->|"Нет, OpenAI-совместим"| LLM_COMPAT["1. Указать base_url + ключ<br/>в litellm.yaml<br/>2. Перезапустить контейнер litellm"]
-    LLM_CHECK -->|"Нет, несовместим"| LLM_CUSTOM["1. Написать кастомный провайдер<br/>для LiteLLM<br/>2. Обновить litellm.yaml<br/>3. Перезапустить контейнер litellm"]
+    LLM_CHECK -->|"Yes"| LLM_NATIVE["1. Add API key to .env<br/>2. Update litellm.yaml<br/>3. Restart litellm container"]
+    LLM_CHECK -->|"No, OpenAI-compatible"| LLM_COMPAT["1. Set base_url + key<br/>in litellm.yaml<br/>2. Restart litellm container"]
+    LLM_CHECK -->|"No, incompatible"| LLM_CUSTOM["1. Write custom provider<br/>for LiteLLM<br/>2. Update litellm.yaml<br/>3. Restart litellm container"]
 
-    TTS_CHECK -->|"Да"| TTS_NATIVE["1. Добавить API-ключ в .env<br/>2. Сменить плагин в AgentSession<br/>3. Перезапустить контейнер agent"]
-    TTS_CHECK -->|"Нет"| TTS_CUSTOM["1. Написать кастомный плагин<br/>(реализация TTS-интерфейса)<br/>2. Добавить API-ключ в .env<br/>3. Перезапустить контейнер agent"]
+    TTS_CHECK -->|"Yes"| TTS_NATIVE["1. Add API key to .env<br/>2. Switch plugin in AgentSession<br/>3. Restart agent container"]
+    TTS_CHECK -->|"No"| TTS_CUSTOM["1. Write custom plugin<br/>(implement TTS interface)<br/>2. Add API key to .env<br/>3. Restart agent container"]
 
     STT_NATIVE --> VERIFY
     STT_CUSTOM --> VERIFY
@@ -1227,7 +1227,7 @@ flowchart TD
     TTS_NATIVE --> VERIFY
     TTS_CUSTOM --> VERIFY
 
-    VERIFY["Проверка UX:<br/>тестирование с новым провайдером<br/>через Agents Playground"]
+    VERIFY["UX Verification:<br/>testing with new provider<br/>via Agents Playground"]
 
     style START fill:#e8f5e9
     style VERIFY fill:#fff3e0
@@ -1235,67 +1235,67 @@ flowchart TD
 
 ---
 
-## 12. Мониторинг и наблюдаемость
+## 12. Monitoring and Observability
 
-### Метрики pipeline
+### Pipeline Metrics
 
-LiveKit Agents предоставляет встроенный сбор метрик:
-- Задержка каждого этапа (STT, LLM, TTS)
-- Общее время voice-to-voice
-- Количество перебиваний
-- Использование токенов LLM
+LiveKit Agents provides built-in metrics collection:
+- Latency for each stage (STT, LLM, TTS)
+- Total voice-to-voice time
+- Number of interruptions
+- LLM token usage
 
-LiveKit Server: количество активных соединений, качество медиа, потери пакетов.
+LiveKit Server: number of active connections, media quality, packet loss.
 
-### Логирование сессий
+### Session Logging
 
-Каждая сессия логирует:
-- Полную историю диалога с временными метками
-- Эмоциональные данные каждой реплики (valence, arousal, raw sentiment)
-- Использованные RAG-фрагменты и их релевантность
-- Метрики задержки на каждом этапе
-- Ошибки STT/LLM/TTS
-- Срабатывания кризисного протокола
+Each session logs:
+- Full dialog history with timestamps
+- Emotional data for each utterance (valence, arousal, raw sentiment)
+- Used RAG chunks and their relevance
+- Latency metrics for each stage
+- STT/LLM/TTS errors
+- Crisis protocol activations
 
-### LLM Observability (пост-MVP)
+### LLM Observability (Post-MVP)
 
-Для анализа качества ответов, корректности RAG-выборки и эмоциональной адаптации планируется подключение инструмента LLM-трейсинга (Langfuse, Phoenix или аналог). Это позволит отслеживать: какие RAG-фрагменты извлекались, насколько они были релевантны, как LLM использовал контекст, в какие моменты срабатывал кризисный протокол. LiteLLM поддерживает интеграцию с Langfuse.
+For analyzing response quality, RAG selection correctness, and emotional adaptation, integration of an LLM tracing tool (Langfuse, Phoenix, or similar) is planned. This will allow tracking: which RAG chunks were retrieved, how relevant they were, how the LLM used context, and at which points the crisis protocol was triggered. LiteLLM supports Langfuse integration.
 
-### Алертинг
+### Alerting
 
-Необходимые алерты:
-- Превышение целевой задержки voice-to-voice (более 2 секунд)
-- Ошибки подключения к внешним API (STT, LLM, TTS)
-- Исчерпание ресурсов VPS (CPU > 80%, RAM > 85%)
-- Недоступность Docker-контейнеров
-- Ошибки LiveKit Server (отказ в подключении, проблемы с TURN)
+Required alerts:
+- Voice-to-voice latency exceeding target (over 2 seconds)
+- Connection errors to external APIs (STT, LLM, TTS)
+- VPS resource exhaustion (CPU > 80%, RAM > 85%)
+- Docker container unavailability
+- LiveKit Server errors (connection refusal, TURN issues)
 
 ---
 
-## 13. Масштабирование (пост-MVP)
+## 13. Scaling (Post-MVP)
 
-Текущая архитектура рассчитана на десятки одновременных сессий на одном VPS. Направления роста:
+The current architecture is designed for tens of concurrent sessions on a single VPS. Growth directions:
 
-### Горизонтальное масштабирование агентов
+### Horizontal Agent Scaling
 
-LiveKit Agent Server нативно поддерживает горизонтальное масштабирование. Несколько Agent Server подключаются к одному LiveKit Server, load balancing распределяет job'ы автоматически. Каждый агент stateless — состояние в PostgreSQL. Docker Compose может быть заменён на Docker Swarm или Kubernetes.
+LiveKit Agent Server natively supports horizontal scaling. Multiple Agent Servers connect to a single LiveKit Server, and load balancing distributes jobs automatically. Each agent is stateless — state is in PostgreSQL. Docker Compose can be replaced with Docker Swarm or Kubernetes.
 
-### Кластеризация LiveKit
+### LiveKit Clustering
 
-LiveKit Server поддерживает кластерный режим с несколькими нодами. При необходимости — переход на LiveKit Cloud для управляемого масштабирования.
+LiveKit Server supports cluster mode with multiple nodes. If needed — transition to LiveKit Cloud for managed scaling.
 
-### Self-hosted STT/TTS
+### Self-Hosted STT/TTS
 
-Для снижения стоимости или улучшения приватности:
-- **STT:** Faster-Whisper на GPU-ноде
-- **TTS:** XTTS v2 или Kokoro на GPU-ноде
+To reduce costs or improve privacy:
+- **STT:** Faster-Whisper on a GPU node
+- **TTS:** XTTS v2 or Kokoro on a GPU node
 
-Замена — смена плагина в конфигурации AgentSession.
+Replacement — switch the plugin in the AgentSession configuration.
 
-### Self-hosted LLM
+### Self-Hosted LLM
 
-Через LiteLLM подключается Ollama, vLLM или аналог. Требует GPU (NVIDIA RTX 4090 24 GB или аналог). Код агента не затрагивается.
+Through LiteLLM, Ollama, vLLM, or similar can be connected. Requires GPU (NVIDIA RTX 4090 24 GB or equivalent). Agent code is not affected.
 
-### Мульти-агентная архитектура
+### Multi-Agent Architecture
 
-Добавление агентов разных специализаций через explicit dispatch в LiveKit Agent Server. Агенты регистрируются под разными `agent_name` и диспатчатся по типу запроса.
+Adding agents with different specializations via explicit dispatch in LiveKit Agent Server. Agents register under different `agent_name` values and are dispatched by request type.

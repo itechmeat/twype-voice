@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev up down logs lint format test clean
+.PHONY: help install dev up down logs lint lint-py lint-web format format-py format-web \
+        test test-api test-agent test-web clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -23,17 +24,48 @@ down: ## Stop all containers
 logs: ## Follow container logs
 	docker compose --env-file .env -f docker/docker-compose.dev.yml logs -f
 
-lint: ## Run linters (ruff + eslint)
+# ---------------------------------------------------------------------------
+# Lint
+# ---------------------------------------------------------------------------
+
+lint: lint-py lint-web ## Run all linters
+
+lint-py: ## Run Python linter (ruff)
 	uv run ruff check .
+
+lint-web: ## Run frontend linter (eslint)
 	cd apps/web && bunx eslint .
 
-format: ## Format code (ruff + prettier)
+# ---------------------------------------------------------------------------
+# Format
+# ---------------------------------------------------------------------------
+
+format: format-py format-web ## Format all code
+
+format-py: ## Format Python code (ruff)
 	uv run ruff format .
+
+format-web: ## Format frontend code (prettier)
 	cd apps/web && bunx prettier --write .
 
-test: ## Run tests (pytest + vitest)
-	uv run pytest apps/api/tests/ apps/agent/tests/
+# ---------------------------------------------------------------------------
+# Test
+# ---------------------------------------------------------------------------
+
+test: test-api test-agent test-web ## Run all tests
+
+test-api: ## Run API tests (pytest)
+	uv run pytest apps/api/tests/ -v
+
+test-agent: ## Run agent tests (pytest)
+	uv run pytest apps/agent/tests/ -v
+
+test-web: ## Run frontend tests (vitest)
 	cd apps/web && bunx vitest run
+
+# ---------------------------------------------------------------------------
+# Misc
+# ---------------------------------------------------------------------------
 
 clean: ## Remove caches and build artifacts
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; true
