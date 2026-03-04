@@ -10,6 +10,9 @@ managed = true
 [tool.uv.workspace]
 members = ["apps/api", "apps/agent"]
 
+[tool.uv.sources]
+twype-api = { workspace = true }
+
 [dependency-groups]
 dev = [
     "ruff>=0.11",
