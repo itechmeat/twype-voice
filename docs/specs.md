@@ -1,54 +1,54 @@
-# Технические спецификации проекта
+# Project Technical Specifications
 
-**Версия:** 1.0 — MVP
-**Дата:** март 2026
+**Version:** 1.0 — MVP
+**Date:** March 2026
 
-> Этот документ определяет технологический стек, версии инструментов, структуру проекта и подходы к разработке. Описание продукта — в `docs/about.md`, архитектура — в `docs/architecture.md`.
-
----
-
-## 1. Правило версий
-
-**Запрещено понижать версии зависимостей ниже указанных минимумов.**
-
-Версии, указанные в этом документе — минимально допустимые. Обновление вверх допускается и поощряется. Понижение версии допускается **только** при наличии документированного технического обоснования и явного утверждения.
-
-Это правило распространяется на:
-- Runtime-окружения (Python, Bun, PostgreSQL)
-- Все Python- и bun-зависимости
-- Docker-образы
-- Тулчейн (uv, Vite, и т.д.)
-
-При добавлении новой зависимости она фиксируется в этом документе с минимальной версией.
+> This document defines the technology stack, tool versions, project structure, and development practices. Product description — in `docs/about.md`, architecture — in `docs/architecture.md`.
 
 ---
 
-## 2. Структура monorepo
+## 1. Version Rule
 
-Проект организован как monorepo — frontend, backend API и агент живут в одном репозитории.
+**Downgrading dependency versions below the specified minimums is prohibited.**
+
+Versions listed in this document are the minimum acceptable versions. Upgrading is allowed and encouraged. Downgrading is allowed **only** with a documented technical justification and explicit approval.
+
+This rule applies to:
+- Runtime environments (Python, Bun, PostgreSQL)
+- All Python and Bun dependencies
+- Docker images
+- Toolchain (uv, Vite, etc.)
+
+When adding a new dependency, it must be recorded in this document with its minimum version.
+
+---
+
+## 2. Monorepo Structure
+
+The project is organized as a monorepo — frontend, backend API, and agent live in one repository.
 
 ```
 twype-voice/
 ├── apps/
 │   ├── api/              # FastAPI REST API
 │   │   ├── src/
-│   │   │   ├── auth/     # Аутентификация, JWT
-│   │   │   ├── routes/   # HTTP-эндпоинты
-│   │   │   ├── models/   # SQLAlchemy-модели
-│   │   │   ├── schemas/  # Pydantic-схемы
-│   │   │   ├── services/ # Бизнес-логика
-│   │   │   └── main.py   # Точка входа FastAPI
-│   │   ├── migrations/   # Alembic-миграции
+│   │   │   ├── auth/     # Authentication, JWT
+│   │   │   ├── routes/   # HTTP endpoints
+│   │   │   ├── models/   # SQLAlchemy models
+│   │   │   ├── schemas/  # Pydantic schemas
+│   │   │   ├── services/ # Business logic
+│   │   │   └── main.py   # FastAPI entry point
+│   │   ├── migrations/   # Alembic migrations
 │   │   ├── tests/
 │   │   └── pyproject.toml
 │   │
 │   ├── agent/            # LiveKit Agent (voice pipeline)
 │   │   ├── src/
-│   │   │   ├── plugins/  # Кастомные плагины (Inworld TTS)
-│   │   │   ├── prompts/  # Загрузка промптов из БД
-│   │   │   ├── rag/      # RAG-поиск, эмбеддинги
-│   │   │   ├── emotions/ # Circumplex-модель
-│   │   │   └── main.py   # Точка входа агента
+│   │   │   ├── plugins/  # Custom plugins (Inworld TTS)
+│   │   │   ├── prompts/  # Prompt loading from DB
+│   │   │   ├── rag/      # RAG search, embeddings
+│   │   │   ├── emotions/ # Circumplex model
+│   │   │   └── main.py   # Agent entry point
 │   │   ├── tests/
 │   │   └── pyproject.toml
 │   │
@@ -57,7 +57,7 @@ twype-voice/
 │       │   ├── components/
 │       │   ├── hooks/
 │       │   ├── pages/
-│       │   ├── lib/      # Утилиты, API-клиент
+│       │   ├── lib/      # Utilities, API client
 │       │   └── main.tsx
 │       ├── public/
 │       ├── tests/
@@ -66,7 +66,7 @@ twype-voice/
 │       └── vite.config.ts
 │
 ├── packages/
-│   └── shared/           # Общие типы, константы (опционально)
+│   └── shared/           # Shared types, constants (optional)
 │
 ├── docker/
 │   ├── Dockerfile.api
@@ -76,124 +76,124 @@ twype-voice/
 │   └── docker-compose.dev.yml    # Development (hot-reload)
 │
 ├── configs/
-│   ├── livekit.yaml      # Конфигурация LiveKit Server
-│   ├── litellm.yaml      # Конфигурация LiteLLM Proxy
-│   ├── caddy/Caddyfile   # Конфигурация Caddy
+│   ├── livekit.yaml      # LiveKit Server configuration
+│   ├── litellm.yaml      # LiteLLM Proxy configuration
+│   ├── caddy/Caddyfile   # Caddy configuration
 │   └── coturn/turnserver.conf
 │
 ├── scripts/
-│   ├── seed.py           # Начальные данные (промпты, конфигурация агента)
-│   ├── ingest.py         # Загрузка материалов в RAG
-│   └── migrate.sh        # Обёртка для запуска миграций
+│   ├── seed.py           # Initial data (prompts, agent configuration)
+│   ├── ingest.py         # Loading materials into RAG
+│   └── migrate.sh        # Wrapper for running migrations
 │
 ├── docs/
-│   ├── about.md          # Описание продукта
-│   ├── architecture.md   # Архитектура системы
-│   ├── specs.md          # Технические спецификации (этот файл)
-│   └── plans/            # Дизайн-документы
+│   ├── about.md          # Product description
+│   ├── architecture.md   # System architecture
+│   ├── specs.md          # Technical specifications (this file)
+│   └── plans/            # Design documents
 │
-├── .env.example          # Шаблон переменных окружения
-├── pyproject.toml        # Корневой Python workspace (uv)
-├── package.json          # Корневой Node workspace
+├── .env.example          # Environment variables template
+├── pyproject.toml        # Root Python workspace (uv)
+├── package.json          # Root Node workspace
 └── README.md
 ```
 
-### Принципы организации
+### Organization Principles
 
-- **apps/** — самостоятельные приложения, каждое собирается в отдельный Docker-образ
-- **packages/** — разделяемый код (используется, если появятся общие типы между api и agent)
-- **configs/** — конфигурационные файлы для инфраструктурных контейнеров (монтируются как volumes)
-- **scripts/** — утилиты, не входящие в runtime приложений
-- **Python workspace** через uv — `apps/api` и `apps/agent` управляются из корневого `pyproject.toml`
-- **Bun workspace** — `apps/web` управляется из корневого `package.json`
+- **apps/** — standalone applications, each built into a separate Docker image
+- **packages/** — shared code (used if common types emerge between api and agent)
+- **configs/** — configuration files for infrastructure containers (mounted as volumes)
+- **scripts/** — utilities not part of application runtime
+- **Python workspace** via uv — `apps/api` and `apps/agent` are managed from the root `pyproject.toml`
+- **Bun workspace** — `apps/web` is managed from the root `package.json`
 
 ---
 
-## 3. Runtime и тулчейн
+## 3. Runtime and Toolchain
 
-| Инструмент | Минимальная версия | Назначение |
+| Tool | Minimum Version | Purpose |
 |---|---|---|
-| Python | 3.13.12+ | Runtime для API и Agent |
-| uv | 0.10.7+ | Менеджер пакетов и виртуальных окружений Python |
-| Bun | 1.3+ | Runtime, менеджер пакетов, тест-раннер для frontend |
-| PostgreSQL | 18.2+ | Основная БД + pgvector |
-| Docker Engine | 27+ | Контейнеризация |
-| Docker Compose | 2.30+ | Оркестрация контейнеров |
+| Python | 3.13.12+ | Runtime for API and Agent |
+| uv | 0.10.7+ | Python package and virtual environment manager |
+| Bun | 1.3+ | Runtime, package manager, test runner for frontend |
+| PostgreSQL | 18.2+ | Primary DB + pgvector |
+| Docker Engine | 27+ | Containerization |
+| Docker Compose | 2.30+ | Container orchestration |
 
-### Почему uv, а не pip/poetry
+### Why uv Instead of pip/poetry
 
-- Установка и резолв зависимостей на порядок быстрее
-- Единый инструмент: создание venv, установка пакетов, запуск скриптов, workspace-управление
-- Поддержка lockfile (`uv.lock`) для воспроизводимых сборок
-- Совместим с pyproject.toml (PEP 621)
+- Dependency installation and resolution is orders of magnitude faster
+- Single tool: venv creation, package installation, script execution, workspace management
+- Lockfile support (`uv.lock`) for reproducible builds
+- Compatible with pyproject.toml (PEP 621)
 
-### Почему Python 3.13, а не 3.14
+### Why Python 3.13, Not 3.14
 
-Python 3.14 — актуальный релиз, но некоторые C-расширения (asyncpg, pgvector, Silero) могут не иметь предсобранных wheels для 3.14. Python 3.13 — стабильная версия с полной поддержкой всех зависимостей проекта.
+Python 3.14 is the current release, but some C extensions (asyncpg, pgvector, Silero) may not have prebuilt wheels for 3.14. Python 3.13 is a stable version with full support for all project dependencies.
 
 ---
 
-## 4. Backend — Python-зависимости
+## 4. Backend — Python Dependencies
 
 ### apps/api (FastAPI REST API)
 
-| Пакет | Минимальная версия | Назначение |
+| Package | Minimum Version | Purpose |
 |---|---|---|
-| fastapi | 0.135.1+ | HTTP-фреймворк |
-| uvicorn | 0.41.0+ | ASGI-сервер |
-| pydantic | 2.12.5+ | Валидация данных, схемы |
+| fastapi | 0.135.1+ | HTTP framework |
+| uvicorn | 0.41.0+ | ASGI server |
+| pydantic | 2.12.5+ | Data validation, schemas |
 | sqlalchemy | 2.0.48+ | ORM (async mode) |
-| alembic | 1.18.4+ | Миграции БД |
-| asyncpg | 0.31.0+ | Async-драйвер PostgreSQL |
-| pgvector | 0.4.2+ | Интеграция pgvector с SQLAlchemy |
-| python-jose | 3.4+ | JWT-токены (access/refresh) |
-| passlib[bcrypt] | 1.7.4+ | Хеширование паролей |
-| resend | 2.7+ | Отправка email (подтверждение регистрации) |
-| python-multipart | 0.0.20+ | Обработка form-data (FastAPI) |
-| httpx | 0.28+ | HTTP-клиент (для тестов и внешних запросов) |
+| alembic | 1.18.4+ | DB migrations |
+| asyncpg | 0.31.0+ | Async PostgreSQL driver |
+| pgvector | 0.4.2+ | pgvector integration with SQLAlchemy |
+| python-jose | 3.4+ | JWT tokens (access/refresh) |
+| passlib[bcrypt] | 1.7.4+ | Password hashing |
+| resend | 2.7+ | Email sending (registration confirmation) |
+| python-multipart | 0.0.20+ | Form-data processing (FastAPI) |
+| httpx | 0.28+ | HTTP client (for tests and external requests) |
 
 ### apps/agent (LiveKit Agent)
 
-| Пакет | Минимальная версия | Назначение |
+| Package | Minimum Version | Purpose |
 |---|---|---|
-| livekit-agents | 1.4.4+ | Фреймворк голосового агента |
-| livekit-plugins-deepgram | 1.4.2+ | STT-плагин Deepgram |
+| livekit-agents | 1.4.4+ | Voice agent framework |
+| livekit-plugins-deepgram | 1.4.2+ | Deepgram STT plugin |
 | livekit-plugins-silero | 1.3.12+ | VAD (Voice Activity Detection) |
-| livekit-plugins-openai | 1.4.2+ | OpenAI-совместимый LLM-плагин (для LiteLLM) |
-| litellm | 1.82.0+ | LLM Proxy SDK (для прямых вызовов, если нужно) |
-| sqlalchemy | 2.0.48+ | ORM (доступ к БД из агента) |
-| asyncpg | 0.31.0+ | Async-драйвер PostgreSQL |
-| pgvector | 0.4.2+ | Работа с векторами |
-| pydantic | 2.12.5+ | Валидация данных |
+| livekit-plugins-openai | 1.4.2+ | OpenAI-compatible LLM plugin (for LiteLLM) |
+| litellm | 1.82.0+ | LLM Proxy SDK (for direct calls, if needed) |
+| sqlalchemy | 2.0.48+ | ORM (DB access from agent) |
+| asyncpg | 0.31.0+ | Async PostgreSQL driver |
+| pgvector | 0.4.2+ | Vector operations |
+| pydantic | 2.12.5+ | Data validation |
 
-### Общие Python-зависимости (workspace-уровень)
+### Shared Python Dependencies (workspace level)
 
-| Пакет | Минимальная версия | Назначение |
+| Package | Minimum Version | Purpose |
 |---|---|---|
-| ruff | 0.11+ | Линтинг + форматирование |
-| pytest | 8.3+ | Тестирование |
-| pytest-asyncio | 0.26+ | Async-тесты |
+| ruff | 0.11+ | Linting + formatting |
+| pytest | 8.3+ | Testing |
+| pytest-asyncio | 0.26+ | Async tests |
 
 ---
 
-## 5. Frontend — Node-зависимости
+## 5. Frontend — Node Dependencies
 
 ### apps/web (React PWA)
 
-| Пакет | Минимальная версия | Назначение |
+| Package | Minimum Version | Purpose |
 |---|---|---|
-| react | 19.2.4+ | UI-фреймворк |
-| react-dom | 19.2.4+ | React DOM-рендерер |
-| typescript | 5.8+ | Типизация |
-| vite | 7.3.1+ | Билд-тул и dev-сервер |
+| react | 19.2.4+ | UI framework |
+| react-dom | 19.2.4+ | React DOM renderer |
+| typescript | 5.8+ | Type checking |
+| vite | 7.3.1+ | Build tool and dev server |
 | livekit-client | 2.17.2+ | LiveKit Client SDK |
-| @livekit/components-react | 2.9.20+ | React-компоненты LiveKit |
-| @tanstack/react-query | 5.75+ | Data fetching для REST API |
-| react-router | 7.5+ | Маршрутизация |
+| @livekit/components-react | 2.9.20+ | LiveKit React components |
+| @tanstack/react-query | 5.75+ | Data fetching for REST API |
+| react-router | 7.5+ | Routing |
 
 ### LiveKit Agents UI
 
-Компоненты Agents UI устанавливаются через shadcn CLI и копируются в исходный код проекта (не являются зависимостью):
+Agents UI components are installed via the shadcn CLI and copied into the project source code (they are not a dependency):
 
 ```bash
 bunx shadcn@latest registry add @agents-ui
@@ -202,70 +202,70 @@ bunx shadcn@latest add @agents-ui/agent-chat-transcript
 bunx shadcn@latest add @agents-ui/agent-audio-visualizer-bar
 ```
 
-Основные компоненты:
-- `AgentControlBar` — управление микрофоном, отключение
-- `AgentChatTranscript` — лента текстового чата с транскриптами
-- `AgentAudioVisualizerBar` / `Wave` / `Aura` — визуализация аудио
-- `AgentChatIndicator` — индикатор состояния агента
+Key components:
+- `AgentControlBar` — microphone control, muting
+- `AgentChatTranscript` — text chat feed with transcripts
+- `AgentAudioVisualizerBar` / `Wave` / `Aura` — audio visualization
+- `AgentChatIndicator` — agent state indicator
 
-### Dev-зависимости frontend
+### Frontend Dev Dependencies
 
-| Пакет | Минимальная версия | Назначение |
+| Package | Minimum Version | Purpose |
 |---|---|---|
-| vitest | 3.2+ | Тестирование |
-| @testing-library/react | 16.3+ | Тестирование React-компонентов |
-| eslint | 9.22+ | Линтинг (flat config) |
-| prettier | 3.5+ | Форматирование |
-| @vitejs/plugin-react | 4.4+ | React plugin для Vite |
+| vitest | 3.2+ | Testing |
+| @testing-library/react | 16.3+ | React component testing |
+| eslint | 9.22+ | Linting (flat config) |
+| prettier | 3.5+ | Formatting |
+| @vitejs/plugin-react | 4.4+ | React plugin for Vite |
 
 ---
 
-## 6. Аутентификация (MVP)
+## 6. Authentication (MVP)
 
-### Подход
+### Approach
 
-Для MVP — **email + password** с подтверждением почты. Без OAuth, без SSO, без сторонних провайдеров.
+For MVP — **email + password** with email confirmation. No OAuth, no SSO, no third-party providers.
 
-### Процесс регистрации
+### Registration Flow
 
-1. Пользователь вводит email + password
-2. API создаёт запись в БД с `is_verified = false`
-3. API отправляет email с 6-значным кодом подтверждения через Resend
-4. Пользователь вводит код в приложении
-5. API верифицирует код, устанавливает `is_verified = true`
-6. Пользователь получает JWT-токены
+1. User enters email + password
+2. API creates a record in the DB with `is_verified = false`
+3. API sends an email with a 6-digit confirmation code via Resend
+4. User enters the code in the application
+5. API verifies the code, sets `is_verified = true`
+6. User receives JWT tokens
 
-### JWT-токены
+### JWT Tokens
 
-- **Access token** — короткоживущий (15 минут), передаётся в заголовке `Authorization: Bearer <token>`
-- **Refresh token** — долгоживущий (30 дней), используется для обновления access token
-- Алгоритм: HS256 с секретом из переменной окружения
+- **Access token** — short-lived (15 minutes), passed in the `Authorization: Bearer <token>` header
+- **Refresh token** — long-lived (30 days), used to renew the access token
+- Algorithm: HS256 with a secret from an environment variable
 
-### LiveKit-токен
+### LiveKit Token
 
-После валидации JWT клиент запрашивает у API LiveKit-токен для подключения к комнате. API генерирует токен через `livekit-api` Python SDK с правами, определёнными для данного пользователя.
+After JWT validation, the client requests a LiveKit token from the API for room connection. The API generates the token via the `livekit-api` Python SDK with permissions defined for the given user.
 
-### Хеширование паролей
+### Password Hashing
 
-bcrypt через passlib. Минимальная длина пароля — 8 символов.
+bcrypt via passlib. Minimum password length — 8 characters.
 
 ### Resend
 
-Сервис для отправки транзакционных email. Используется только для подтверждения регистрации (MVP). API-ключ передаётся через переменную окружения `RESEND_API_KEY`.
+Service for sending transactional emails. Used only for registration confirmation (MVP). The API key is passed via the `RESEND_API_KEY` environment variable.
 
 ---
 
-## 7. База данных и миграции
+## 7. Database and Migrations
 
 ### SQLAlchemy 2.0
 
-- **Async mode** через asyncpg
-- **Mapped columns** (Mapped[type] вместо Column(Type))
-- **Type annotations** во всех моделях
-- Сессии через async context manager
+- **Async mode** via asyncpg
+- **Mapped columns** (Mapped[type] instead of Column(Type))
+- **Type annotations** in all models
+- Sessions via async context manager
 
 ```python
-# Стиль объявления моделей
+# Model declaration style
 class User(Base):
     __tablename__ = "users"
 
@@ -276,38 +276,38 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 ```
 
-### Соглашения по именованию
+### Naming Conventions
 
-- Таблицы: **snake_case, множественное число** (`users`, `sessions`, `messages`, `knowledge_chunks`)
-- Колонки: **snake_case** (`created_at`, `source_type`, `embedding_vector`)
-- Индексы: `ix_{table}_{column}` (автоматически через SQLAlchemy naming convention)
+- Tables: **snake_case, plural** (`users`, `sessions`, `messages`, `knowledge_chunks`)
+- Columns: **snake_case** (`created_at`, `source_type`, `embedding_vector`)
+- Indexes: `ix_{table}_{column}` (automatically via SQLAlchemy naming convention)
 - Foreign keys: `fk_{table}_{column}_{ref_table}`
 - Constraints: `ck_{table}_{description}`
 
 ### Alembic
 
-- Миграции хранятся в `apps/api/migrations/`
-- Автогенерация миграций: `alembic revision --autogenerate -m "description"`
-- Все миграции — **forward-only** для MVP (downgrade не обязателен)
-- Миграции запускаются перед стартом api-контейнера
+- Migrations are stored in `apps/api/migrations/`
+- Migration autogeneration: `alembic revision --autogenerate -m "description"`
+- All migrations are **forward-only** for MVP (downgrade is not required)
+- Migrations run before the api container starts
 
 ### pgvector
 
-- Расширение включается миграцией: `CREATE EXTENSION IF NOT EXISTS vector`
-- Колонки с эмбеддингами: тип `Vector(dim)` через SQLAlchemy-интеграцию pgvector
-- HNSW-индексы для ANN-поиска
-- Размерность эмбеддингов определяется выбранной embedding-моделью (фиксируется при загрузке первых материалов)
+- Extension is enabled via migration: `CREATE EXTENSION IF NOT EXISTS vector`
+- Embedding columns: `Vector(dim)` type via pgvector SQLAlchemy integration
+- HNSW indexes for ANN search
+- Embedding dimensionality is determined by the chosen embedding model (fixed when the first materials are loaded)
 
 ---
 
-## 8. Линтинг и кодстайл
+## 8. Linting and Code Style
 
 ### Python — Ruff
 
-Ruff используется и для линтинга, и для форматирования (замена flake8, black, isort).
+Ruff is used for both linting and formatting (replacing flake8, black, isort).
 
 ```toml
-# pyproject.toml (корневой)
+# pyproject.toml (root)
 [tool.ruff]
 target-version = "py313"
 line-length = 100
@@ -329,7 +329,7 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # assert допустим в тестах
+"tests/**" = ["S101"]  # assert is acceptable in tests
 
 [tool.ruff.format]
 quote-style = "double"
@@ -337,10 +337,10 @@ quote-style = "double"
 
 ### Frontend — ESLint + Prettier
 
-ESLint 9+ с flat config. Prettier для форматирования.
+ESLint 9+ with flat config. Prettier for formatting.
 
 ```js
-// eslint.config.js (шаблон)
+// eslint.config.js (template)
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import reactPlugin from "eslint-plugin-react";
@@ -360,10 +360,10 @@ export default tseslint.config(
 );
 ```
 
-### TypeScript — строгий режим
+### TypeScript — Strict Mode
 
 ```json
-// tsconfig.json (ключевые опции)
+// tsconfig.json (key options)
 {
   "compilerOptions": {
     "strict": true,
@@ -377,74 +377,74 @@ export default tseslint.config(
 }
 ```
 
-### Pre-commit hooks
+### Pre-commit Hooks
 
-Проверки перед коммитом (через `lefthook`):
-- `ruff check` + `ruff format --check` для Python
-- `bunx eslint .` + `bunx prettier --check .` для TypeScript
-- `bunx tsc --noEmit` для проверки типов
+Pre-commit checks (via `lefthook`):
+- `ruff check` + `ruff format --check` for Python
+- `bunx eslint .` + `bunx prettier --check .` for TypeScript
+- `bunx tsc --noEmit` for type checking
 
 ---
 
-## 9. Тестирование (MVP)
+## 9. Testing (MVP)
 
 ### Backend — pytest
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |---|---|
-| pytest | Тестовый фреймворк |
-| pytest-asyncio | Async-тесты |
-| httpx | Async HTTP-клиент для тестов FastAPI |
+| pytest | Test framework |
+| pytest-asyncio | Async tests |
+| httpx | Async HTTP client for FastAPI tests |
 
-Что тестируется на MVP:
-- **API-эндпоинты** — каждый эндпоинт покрыт минимум одним happy-path тестом
-- **Аутентификация** — регистрация, логин, refresh, верификация email
-- **Критические сервисы** — генерация LiveKit-токенов, получение источников
+What is tested in MVP:
+- **API endpoints** — each endpoint is covered by at least one happy-path test
+- **Authentication** — registration, login, refresh, email verification
+- **Critical services** — LiveKit token generation, source retrieval
 
-Что НЕ тестируется на MVP:
-- LiveKit Agent (voice pipeline) — тестируется вручную через Agents Playground
-- Интеграция с внешними API (Deepgram, Inworld, LLM-провайдеры)
-- e2e-сценарии
+What is NOT tested in MVP:
+- LiveKit Agent (voice pipeline) — tested manually via Agents Playground
+- Integration with external APIs (Deepgram, Inworld, LLM providers)
+- e2e scenarios
 
 ```python
-# Структура тестов
+# Test structure
 apps/api/tests/
-├── conftest.py          # Фикстуры (test client, test DB)
-├── test_auth.py         # Регистрация, логин, JWT
-├── test_sessions.py     # История сессий
-└── test_sources.py      # Метаданные RAG-источников
+├── conftest.py          # Fixtures (test client, test DB)
+├── test_auth.py         # Registration, login, JWT
+├── test_sessions.py     # Session history
+└── test_sources.py      # RAG source metadata
 ```
 
 ### Frontend — Vitest
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |---|---|
-| vitest | Тестовый фреймворк (интеграция с Vite) |
-| @testing-library/react | Тестирование React-компонентов |
+| vitest | Test framework (Vite integration) |
+| @testing-library/react | React component testing |
 
-Что тестируется на MVP:
-- **Утилиты** — форматирование, парсинг, хелперы
-- **Ключевые компоненты** — рендеринг, пользовательские события
+What is tested in MVP:
+- **Utilities** — formatting, parsing, helpers
+- **Key components** — rendering, user events
 
 ---
 
-## 10. Docker-разработка
+## 10. Docker Development
 
 ### Production (docker-compose.yml)
 
-Полный стек из 7 контейнеров (описан в `docs/architecture.md`, раздел 1). Образы собираются multi-stage, минимальный размер.
+Full stack of 7 containers (described in `docs/architecture.md`, section 1). Images are built multi-stage, minimal size.
 
 ### Development (docker-compose.dev.yml)
 
-Отличия от production:
-- **apps/api** — volume-маунт исходников, uvicorn с `--reload`
-- **apps/agent** — volume-маунт исходников, LiveKit Agent в режиме `dev` (auto-reload)
-- **apps/web** — volume-маунт исходников, Vite dev server с HMR
-- **postgres** — тот же образ, но с dev-данными (seed)
-- **livekit/coturn/litellm/caddy** — идентичны production
+Differences from production:
+- **apps/api** — source volume mount, uvicorn with `--reload`
+- **apps/agent** — source volume mount, LiveKit Agent in `dev` mode (auto-reload)
+- **apps/web** — source volume mount, Vite dev server with HMR
+- **postgres** — same image, but with dev data (seed)
+- **livekit/coturn/litellm/caddy** — identical to production
 
 ```yaml
-# docker-compose.dev.yml (схематично)
+# docker-compose.dev.yml (schematic)
 services:
   api:
     build:
@@ -478,7 +478,7 @@ services:
     command: bunx vite --host
 ```
 
-### Запуск
+### Running
 
 ```bash
 # Development
@@ -487,75 +487,75 @@ docker compose -f docker/docker-compose.dev.yml up
 # Production
 docker compose -f docker/docker-compose.yml up -d
 
-# Миграции
+# Migrations
 docker compose exec api alembic upgrade head
 
-# Загрузка начальных данных
+# Load initial data
 docker compose exec api python scripts/seed.py
 ```
 
 ---
 
-## 11. Переменные окружения
+## 11. Environment Variables
 
-Все секреты хранятся в `.env` файле (не коммитится). Шаблон — `.env.example`.
+All secrets are stored in the `.env` file (never committed). Template — `.env.example`.
 
-### API-контейнер
+### API Container
 
-| Переменная | Описание |
+| Variable | Description |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string |
-| `JWT_SECRET` | Секрет для подписи JWT-токенов |
-| `RESEND_API_KEY` | API-ключ Resend для email |
-| `LIVEKIT_API_KEY` | LiveKit API key (для генерации токенов) |
+| `JWT_SECRET` | Secret for signing JWT tokens |
+| `RESEND_API_KEY` | Resend API key for email |
+| `LIVEKIT_API_KEY` | LiveKit API key (for token generation) |
 | `LIVEKIT_API_SECRET` | LiveKit API secret |
-| `LIVEKIT_URL` | URL LiveKit Server (внутренний) |
+| `LIVEKIT_URL` | LiveKit Server URL (internal) |
 
-### Agent-контейнер
+### Agent Container
 
-| Переменная | Описание |
+| Variable | Description |
 |---|---|
 | `LIVEKIT_API_KEY` | LiveKit API key |
 | `LIVEKIT_API_SECRET` | LiveKit API secret |
-| `LIVEKIT_URL` | URL LiveKit Server (внутренний) |
-| `LITELLM_URL` | URL LiteLLM Proxy (внутренний) |
+| `LIVEKIT_URL` | LiveKit Server URL (internal) |
+| `LITELLM_URL` | LiteLLM Proxy URL (internal) |
 | `DATABASE_URL` | PostgreSQL connection string |
-| `DEEPGRAM_API_KEY` | API-ключ Deepgram (STT) |
-| `INWORLD_API_KEY` | API-ключ Inworld (TTS) |
-| `ELEVENLABS_API_KEY` | API-ключ ElevenLabs (fallback TTS) |
+| `DEEPGRAM_API_KEY` | Deepgram API key (STT) |
+| `INWORLD_API_KEY` | Inworld API key (TTS) |
+| `ELEVENLABS_API_KEY` | ElevenLabs API key (fallback TTS) |
 
-### LiteLLM-контейнер
+### LiteLLM Container
 
-| Переменная | Описание |
+| Variable | Description |
 |---|---|
-| `GOOGLE_API_KEY` | API-ключ Google (Gemini) |
-| `OPENAI_API_KEY` | API-ключ OpenAI (fallback LLM) |
+| `GOOGLE_API_KEY` | Google API key (Gemini) |
+| `OPENAI_API_KEY` | OpenAI API key (fallback LLM) |
 
-### LiveKit-контейнер
+### LiveKit Container
 
-Конфигурация через `configs/livekit.yaml` (API key/secret задаются в YAML).
+Configuration via `configs/livekit.yaml` (API key/secret are set in YAML).
 
-### coturn-контейнер
+### coturn Container
 
-| Переменная | Описание |
+| Variable | Description |
 |---|---|
-| `TURN_USERNAME` | Имя пользователя TURN |
-| `TURN_PASSWORD` | Пароль TURN |
+| `TURN_USERNAME` | TURN username |
+| `TURN_PASSWORD` | TURN password |
 
 ---
 
-## 12. Git-конвенции
+## 12. Git Conventions
 
-### Ветвление
+### Branching
 
-- `main` — стабильная ветка, деплоится на production
-- `dev` — интеграционная ветка для разработки
-- Feature-ветки: `feat/short-description`
-- Bugfix-ветки: `fix/short-description`
+- `main` — stable branch, deployed to production
+- `dev` — integration branch for development
+- Feature branches: `feat/short-description`
+- Bugfix branches: `fix/short-description`
 
-### Коммиты
+### Commits
 
-Формат [Conventional Commits](https://www.conventionalcommits.org/):
+Format: [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
 <type>(<scope>): <description>
@@ -566,5 +566,5 @@ chore(docker): update PostgreSQL to 18.3
 docs(specs): add testing conventions
 ```
 
-Типы: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `style`, `perf`.
+Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `style`, `perf`.
 Scope: `api`, `agent`, `web`, `docker`, `docs`, `ci`.
