@@ -10,10 +10,10 @@
 - [x] **S01. Docker-инфраструктура и заглушки сервисов**
       Развертка monorepo-структуры проекта и Docker Compose с семью контейнерами-заглушками: `caddy`, `api`, `livekit`, `agent`, `litellm`, `postgres`, `coturn`. Каждый контейнер стартует и отвечает health check, но не содержит бизнес-логики. Настроены внутренняя сеть `twype-net`, volumes, `.env.example`, конфиги (`livekit.yaml`, `litellm.yaml`, `Caddyfile`, `turnserver.conf`). Dev- и production-композы. Корневые `pyproject.toml` (uv workspace) и `package.json` (bun workspace). Линтинг: ruff для Python, ESLint + Prettier для TypeScript.
 
-- [ ] **S02. Схема базы данных и миграции**
+- [x] **S02. Схема базы данных и миграции**
       SQLAlchemy 2.0 модели (async, Mapped columns): `users`, `sessions`, `messages`, `agent_configs`, `agent_prompts`, `knowledge_chunks`, `verification_codes`, `crisis_contacts`. Расширение pgvector. Alembic-инфраструктура в `apps/api/migrations/`. Начальная миграция, seed-скрипт с тестовыми данными. Соглашения по именованию таблиц и индексов.
 
-- [ ] **S03. Аутентификация (регистрация, логин, JWT)**
+- [x] **S03. Аутентификация (регистрация, логин, JWT)**
       FastAPI-эндпоинты: `POST /auth/register`, `POST /auth/verify`, `POST /auth/login`, `POST /auth/refresh`. Регистрация с email + password, хеширование через bcrypt/passlib, отправка 6-значного кода через Resend, верификация email. JWT-токены: access (15 мин, HS256) + refresh (30 дней). Middleware для валидации Bearer-токенов. Тесты на все эндпоинты аутентификации.
 
 - [ ] **S04. Управление сессиями и генерация LiveKit-токенов**
