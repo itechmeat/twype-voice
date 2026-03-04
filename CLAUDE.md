@@ -37,6 +37,10 @@ When delegating to agents, pass raw intent — what needs to happen and why. Don
 
 When delegating work to subagents or spawning a team, use the `/team-lead` skill.
 
+### Story planning
+
+When the user asks to "plan the next story" (or similar), find the first unchecked (`- [ ]`) story in `docs/plan.md` and use it as input for `/openspec-new-change`. Stories are sequential — always pick the next one by order, not by topic.
+
 ## Documentation
 
 - `docs/about.md` — product description, concepts, MVP scope
