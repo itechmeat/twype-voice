@@ -1,0 +1,5 @@
+{
+  "name": "twype-voice",
+  "private": true,
+  "workspaces": ["apps/web"]
+}

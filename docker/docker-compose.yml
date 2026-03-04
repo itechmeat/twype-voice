@@ -1,0 +1,168 @@
+# NOTE: Pin third-party images to specific versions before deploying to production.
+# Current tested versions: livekit v1.9.11, coturn 4.9.0, litellm main-latest
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    networks:
+      - twype-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-twype}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ../configs/livekit.yaml:/etc/livekit.yaml:ro
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    ports:
+      - "7881:7881"
+      - "50000-60000:50000-60000/udp"
+    networks:
+      - twype-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7880"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    command: --config /app/config.yaml
+    volumes:
+      - ../configs/litellm.yaml:/app/config.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    networks:
+      - twype-net
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; r=urllib.request.Request('http://localhost:4000/health',headers={'Authorization':'Bearer '+__import__('os').environ['LITELLM_MASTER_KEY']}); urllib.request.urlopen(r)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    volumes:
+      - ../configs/caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - twype-net
+    depends_on:
+      api:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  coturn:
+    image: coturn/coturn:latest
+    entrypoint: ["/bin/sh", "-c", "sed -e \"s/\\$${TURN_USERNAME}/$TURN_USERNAME/g\" -e \"s/\\$${TURN_PASSWORD}/$TURN_PASSWORD/g\" -e \"s/\\$${EXTERNAL_IP}/$EXTERNAL_IP/g\" /etc/turnserver.conf.tpl > /tmp/turnserver.conf && exec turnserver -c /tmp/turnserver.conf"]
+    volumes:
+      - ../configs/coturn/turnserver.conf:/etc/turnserver.conf.tpl:ro
+    environment:
+      TURN_USERNAME: ${TURN_USERNAME}
+      TURN_PASSWORD: ${TURN_PASSWORD}
+      EXTERNAL_IP: ${EXTERNAL_IP}
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "5349:5349"
+      - "49152-65535:49152-65535/udp"
+    networks:
+      - twype-net
+    healthcheck:
+      test: ["CMD-SHELL", "turnutils_stunclient localhost 2>&1 | grep -q 'reflexive addr'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: prod
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_URL: ${LIVEKIT_URL}
+    networks:
+      - twype-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+      target: prod
+    environment:
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_URL: ${LIVEKIT_URL}
+      LITELLM_URL: ${LITELLM_URL}
+      DATABASE_URL: ${DATABASE_URL}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
+      INWORLD_API_KEY: ${INWORLD_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+    networks:
+      - twype-net
+    depends_on:
+      livekit:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+      target: prod
+    networks:
+      - twype-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+networks:
+  twype-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  caddy-data:
+  caddy-config:

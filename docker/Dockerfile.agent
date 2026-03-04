@@ -1,0 +1,35 @@
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# --- dev target: volume-mount sources, auto-reload ---
+FROM base AS dev
+
+COPY pyproject.toml uv.lock* ./
+COPY apps/api/pyproject.toml apps/api/pyproject.toml
+COPY apps/api/src/__init__.py apps/api/src/__init__.py
+COPY apps/agent/pyproject.toml apps/agent/pyproject.toml
+COPY apps/agent/src/__init__.py apps/agent/src/__init__.py
+
+RUN uv sync --frozen --package twype-agent 2>/dev/null || uv sync --package twype-agent
+
+CMD ["uv", "run", "--package", "twype-agent", "python", "src/main.py", "dev"]
+
+# --- prod target: copy source ---
+FROM base AS prod
+
+COPY pyproject.toml uv.lock ./
+COPY apps/api/pyproject.toml apps/api/pyproject.toml
+COPY apps/api/src/__init__.py apps/api/src/__init__.py
+COPY apps/agent/pyproject.toml apps/agent/pyproject.toml
+COPY apps/agent/src/__init__.py apps/agent/src/__init__.py
+
+RUN uv sync --frozen --package twype-agent
+
+COPY apps/agent/src ./src
+
+CMD ["uv", "run", "--package", "twype-agent", "python", "src/main.py", "start"]
