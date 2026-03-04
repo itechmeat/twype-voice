@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+if TYPE_CHECKING:
+    from .message import Message
+    from .user import User
 
 from .base import Base
 
@@ -29,4 +34,5 @@ class Session(Base):
     )
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    user = relationship("User")
+    user: Mapped[User] = relationship("User", back_populates="sessions")
+    messages: Mapped[list[Message]] = relationship("Message", back_populates="session")

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, text
+from sqlalchemy import CheckConstraint, DateTime, String, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,6 +12,12 @@ from .base import Base
 
 class KnowledgeSource(Base):
     __tablename__ = "knowledge_sources"
+    __table_args__ = (
+        CheckConstraint(
+            "source_type IN ('book', 'video', 'podcast', 'article', 'post')",
+            name="ck_knowledge_sources_source_type_allowed",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 

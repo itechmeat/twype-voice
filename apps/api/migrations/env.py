@@ -33,7 +33,8 @@ def _require_database_url() -> str:
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is not set")
-    return database_url
+    # Escape percent signs for ConfigParser (e.g. password with special chars)
+    return database_url.replace("%", "%%")
 
 
 def run_migrations_offline() -> None:
