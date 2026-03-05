@@ -19,10 +19,10 @@ async def send_verification_code(email: str, code: str) -> None:
         {
             "from": from_address,
             "to": [email],
-            "subject": "Twype — код подтверждения",
+            "subject": "Twype — verification code",
             "html": (
-                f"<p>Ваш код подтверждения: <strong>{code}</strong></p>"
-                "<p>Код действителен 10 минут.</p>"
+                f"<p>Your verification code: <strong>{code}</strong></p>"
+                "<p>The code is valid for 10 minutes.</p>"
             ),
         },
     )

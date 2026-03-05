@@ -17,15 +17,72 @@ TEST_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-PROMPT_LAYERS: dict[str, str] = {
-    "system_prompt": "Ты — Twype. Это placeholder системного промпта.",
-    "voice_prompt": "Placeholder: голосовой режим. Отвечай кратко и по делу.",
-    "dual_layer_prompt": "Placeholder: dual-layer. Совмещай voice и text стратегию.",
-    "emotion_prompt": "Placeholder: эмоции. Учитывай валентность и возбуждение.",
-    "crisis_prompt": "Placeholder: кризис. При рисках советуй обратиться к специалисту.",
-    "rag_prompt": "Placeholder: RAG. При наличии источников — используй их аккуратно.",
-    "language_prompt": "Placeholder: язык. Русский по умолчанию, без жёстких ограничений.",
-    "proactive_prompt": "Placeholder: проактивность. Иногда предлагай следующий шаг.",
+PROMPT_LAYER_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "system_prompt": (
+            "You are Twype, an expert AI assistant for professional topics. "
+            "Help carefully, stay structured, and be explicit about the limits of your confidence. "
+            "Do not invent facts, hide uncertainty, or provide dangerous instructions."
+        ),
+        "voice_prompt": (
+            "In voice mode, respond naturally, briefly, and conversationally, "
+            "usually in 2-5 sentences. "
+            "Start with the main point, then offer one useful next step or a short clarification."
+        ),
+        "dual_layer_prompt": (
+            "Structure each answer in two layers: "
+            "a short voice-friendly version and a more precise "
+            "text-channel formulation when it helps. "
+            "Avoid unnecessary repetition and keep the meaning consistent."
+        ),
+        "emotion_prompt": (
+            "Take the user's emotional signals into account: "
+            "speak more calmly and gently during anxiety, "
+            "add reassurance and clarity during confusion, "
+            "and stay professional with a neutral tone."
+        ),
+        "crisis_prompt": (
+            "Notice signs of crisis, self-harm, violence, or acute disorganization. "
+            "In those cases, respond with empathy, avoid increasing risk, "
+            "and gently recommend urgent help "
+            "from qualified professionals and emergency services "
+            "when the situation appears immediate."
+        ),
+        "rag_prompt": (
+            "If knowledge base materials are available, rely on them first. "
+            "Separate source-based facts from general reasoning "
+            "and explicitly mention which materials "
+            "you are relying on whenever possible."
+        ),
+        "language_prompt": (
+            "Always adapt to the user's language and keep using it until the user switches. "
+            "If the user mixes languages, choose the dominant language "
+            "and avoid unnecessary code-switching."
+        ),
+        "proactive_prompt": (
+            "If the user goes quiet, hesitates, or gives an incomplete answer, "
+            "gently suggest a next step: "
+            "a clarifying question, a short action plan, or a way to continue the conversation."
+        ),
+        "mode_voice_guidance": (
+            "Current input mode is voice. Reply briefly, naturally, and conversationally. "
+            "Prefer a spoken rhythm over heavy structure."
+        ),
+        "mode_text_guidance": (
+            "Current input mode is text. Reply with more detail and clearer structure. "
+            "Use concise sections or bullets when that improves readability."
+        ),
+    },
+    "ru": {
+        "mode_voice_guidance": (
+            "Current input mode is voice. Reply briefly, naturally, and conversationally. "
+            "Prioritize clarity for spoken delivery."
+        ),
+        "mode_text_guidance": (
+            "Current input mode is text. Reply with more detail and stronger structure. "
+            "Use short sections or bullets when they improve readability."
+        ),
+    }
 }
 
 
@@ -63,23 +120,25 @@ async def seed_user() -> None:
 
 async def seed_agent_config() -> None:
     async with session_scope() as session:
-        for key, value in PROMPT_LAYERS.items():
-            stmt = insert(AgentConfig).values(
-                key=key,
-                value=value,
-                version=1,
-                is_active=True,
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[AgentConfig.key],
-                set_={
-                    "value": stmt.excluded.value,
-                    "version": stmt.excluded.version,
-                    "is_active": stmt.excluded.is_active,
-                    "updated_at": sa.text("now()"),
-                },
-            )
-            await session.execute(stmt)
+        for locale, prompt_layers in PROMPT_LAYER_TRANSLATIONS.items():
+            for key, value in prompt_layers.items():
+                stmt = insert(AgentConfig).values(
+                    key=key,
+                    locale=locale,
+                    value=value,
+                    version=1,
+                    is_active=True,
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[AgentConfig.key, AgentConfig.locale],
+                    set_={
+                        "value": stmt.excluded.value,
+                        "version": stmt.excluded.version,
+                        "is_active": stmt.excluded.is_active,
+                        "updated_at": sa.text("now()"),
+                    },
+                )
+                await session.execute(stmt)
 
 
 async def seed_tts_config() -> None:

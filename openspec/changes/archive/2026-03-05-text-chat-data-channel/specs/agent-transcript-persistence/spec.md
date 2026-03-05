@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Save user voice transcripts to database
 The agent SHALL save final user transcripts to the `messages` table in PostgreSQL. Each message record SHALL include: `session_id`, `role=user`, `mode` (determined by the input source), `content` (final transcript text), `voice_transcript` (raw transcript for voice, NULL for text), and `sentiment_raw` (Deepgram sentiment score or null). The `save_transcript` function SHALL accept an optional `mode` parameter defaulting to `"voice"`.

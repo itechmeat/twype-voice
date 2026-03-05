@@ -34,13 +34,13 @@
 - [x] **S09. Voice pipeline end-to-end**
       Assembling the full voice pipeline: VAD -> Turn Detector -> STT -> LLM -> TTS -> WebRTC audio. Turn Detector setup (end-of-utterance detection): pause thresholds, safety timeout of 3 sec. Input noise suppression. End-to-end streaming between all components. Target voice-to-voice latency ~800 ms. Thinking sounds and TTS fillers during extended processing.
 
-- [ ] **S10. Prompt system from the database**
+- [x] **S10. Prompt system from the database**
       Loading all prompt layers from PostgreSQL during agent initialization: system prompt, voice mode prompt, dual-layer response prompt, emotional adaptation prompt, crisis protocol prompt, RAG context prompt, language adaptation prompt, proactive utterance prompt. Prompt Builder assembles the final LLM context. Config snapshot at session start — freezing the configuration version. Seed script with an initial set of prompts.
 
-- [ ] **S11. Text chat via data channel**
+- [x] **S11. Text chat via data channel**
       Data Channel Handler in the agent: receiving text messages from the client via LiveKit data channel. Routing text directly to the LLM (bypassing STT). Streaming the text response back via data channel. Saving text messages to the same `messages` table with a mode label. TTS is not invoked in text mode.
 
-- [ ] **S12. Mode switching: voice <-> text**
+- [x] **S12. Mode switching: voice <-> text**
       A single dialogue stream when switching between modes. The agent determines the current mode by the type of incoming data (audio track vs data channel). Context Manager maintains a shared history for both modes. When switching to text — the LLM generates detailed responses; when switching to voice — brief, conversational ones.
 
 - [ ] **S13. RAG: knowledge base ingestion**

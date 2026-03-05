@@ -22,6 +22,19 @@ Twype — interactive AI agent specializing in expert topics (medicine, psycholo
 
 All doc edits go through the `tech-writer` agent — never edit documentation files inline. Exceptions: the researcher creates explorations, and the architect owns decision substance.
 
+All non-Markdown project files MUST be written in English only. No other language is allowed
+directly in source files. This includes source code, tests, configuration values, default
+seed content, user-facing fallback strings, and code comments. `*.md` files are the only
+exception.
+
+Any localized or user-facing text that must exist in multiple languages MUST go through the
+project translation system instead of being hardcoded in source files.
+
+- Backend: use the backend translation/localization system and locale-aware stored content
+  for prompts, generated text templates, emails, and other localized runtime text.
+- Frontend: use the frontend translation/localization system for all UI copy and localized
+  user-facing text.
+
 ## Skills & Docs Attribution
 
 Every final report MUST include at the end:

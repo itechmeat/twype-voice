@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -47,6 +47,8 @@ async def save_transcript(
     session_id: uuid.UUID,
     text: str,
     sentiment_raw: float | None,
+    *,
+    mode: Literal["voice", "text"] = "voice",
 ) -> uuid.UUID | None:
     cleaned_text = text.strip()
     if not cleaned_text:
@@ -62,9 +64,9 @@ async def save_transcript(
             message = message_model(
                 session_id=session_id,
                 role="user",
-                mode="voice",
+                mode=mode,
                 content=cleaned_text,
-                voice_transcript=cleaned_text,
+                voice_transcript=cleaned_text if mode == "voice" else None,
                 sentiment_raw=sentiment_raw,
             )
             session.add(message)
@@ -76,7 +78,12 @@ async def save_transcript(
         return None
 
 
-async def save_agent_response(session_id: uuid.UUID, text: str) -> uuid.UUID | None:
+async def save_agent_response(
+    session_id: uuid.UUID,
+    text: str,
+    *,
+    mode: Literal["voice", "text"] = "voice",
+) -> uuid.UUID | None:
     cleaned_text = text.strip()
     if not cleaned_text:
         return None
@@ -91,9 +98,9 @@ async def save_agent_response(session_id: uuid.UUID, text: str) -> uuid.UUID | N
             message = message_model(
                 session_id=session_id,
                 role="assistant",
-                mode="voice",
+                mode=mode,
                 content=cleaned_text,
-                voice_transcript=cleaned_text,
+                voice_transcript=cleaned_text if mode == "voice" else None,
                 sentiment_raw=None,
             )
             session.add(message)
