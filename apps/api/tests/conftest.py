@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-tests-only")
 os.environ.setdefault("RESEND_API_KEY", "re_test_fake")
+os.environ.setdefault("LIVEKIT_API_KEY", "lk_test_api_key")
+os.environ.setdefault("LIVEKIT_API_SECRET", "lk_test_api_secret")
 
 import pytest
 from httpx import ASGITransport, AsyncClient
