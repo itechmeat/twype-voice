@@ -16,10 +16,10 @@
 - [x] **S03. Authentication (registration, login, JWT)**
       FastAPI endpoints: `POST /auth/register`, `POST /auth/verify`, `POST /auth/login`, `POST /auth/refresh`. Registration with email + password, hashing via bcrypt/passlib, sending a 6-digit code via Resend, email verification. JWT tokens: access (15 min, HS256) + refresh (30 days). Middleware for Bearer token validation. Tests for all authentication endpoints.
 
-- [ ] **S04. Session management and LiveKit token generation**
+- [x] **S04. Session management and LiveKit token generation**
       FastAPI endpoints: `POST /sessions/start` (create session + generate LiveKit token with permissions), `GET /sessions/history` (list of user's past sessions), `GET /sessions/{id}/messages` (session message history). LiveKit token generation via `livekit-api` SDK with `can_publish`, `can_subscribe`, `can_publish_data` permissions. Session recording to the database.
 
-- [ ] **S05. LiveKit Agent: connecting to a room**
+- [x] **S05. LiveKit Agent: connecting to a room**
       Basic LiveKit Agent in `apps/agent/`: entry point `main.py`, connecting to LiveKit Server via SDK, receiving and dispatching jobs on room creation. The agent connects as a participant to the room and receives the audio stream. Silero VAD for speech detection. At this stage the agent only listens — no STT/LLM/TTS.
 
 - [ ] **S06. STT integration (Deepgram)**
