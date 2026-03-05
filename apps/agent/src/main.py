@@ -3,7 +3,13 @@ import logging
 import os
 import sys
 
-from agent import TwypeAgent, build_session, build_vad, format_participant
+import httpx
+from agent import (
+    TwypeAgent,
+    build_session,
+    build_vad,
+    format_participant,
+)
 from datachannel import publish_transcript
 from db import build_engine, build_sessionmaker
 from livekit.agents import (
@@ -14,9 +20,17 @@ from livekit.agents import (
     WorkerOptions,
     cli,
 )
+from livekit.agents.voice.room_io import RoomInputOptions
+from llm import build_llm
 from settings import AgentSettings
 from stt import build_stt
-from transcript import configure_transcript_store, resolve_session_id, save_transcript
+from transcript import (
+    configure_transcript_store,
+    resolve_session_id,
+    save_agent_response,
+    save_transcript,
+)
+from tts import build_tts
 
 logger = logging.getLogger("twype-agent")
 
@@ -31,10 +45,21 @@ def configure_logging(*, level: str) -> None:
 
 def prewarm(proc: JobProcess) -> None:
     settings = _settings
-    assert settings is not None
+    if settings is None:
+        raise RuntimeError("settings are not configured")
 
     proc.userdata["vad"] = build_vad(settings)
     proc.userdata["stt"] = build_stt(settings)
+    proc.userdata["llm"] = build_llm(settings)
+    proc.userdata["tts"] = build_tts(settings, language=settings.STT_LANGUAGE)
+
+    if settings.NOISE_CANCELLATION_ENABLED:
+        from livekit.plugins import noise_cancellation
+
+        if not proc.userdata.get("noise_cancellation_loaded"):
+            noise_cancellation.load()
+            proc.userdata["noise_cancellation_loaded"] = True
+        proc.userdata["noise_cancellation"] = noise_cancellation.BVC()
 
     engine = build_engine(settings)
     proc.userdata["db_engine"] = engine
@@ -88,7 +113,8 @@ _settings: AgentSettings | None = None
 
 async def entrypoint(ctx: JobContext) -> None:
     settings = _settings
-    assert settings is not None
+    if settings is None:
+        raise RuntimeError("settings are not configured")
 
     logger.info("job accepted, room=%s", ctx.room.name)
 
@@ -101,6 +127,11 @@ async def entrypoint(ctx: JobContext) -> None:
         raise
 
     logger.info("connected to room, room=%s", ctx.room.name)
+
+    last_language = settings.STT_LANGUAGE
+
+    def get_last_language() -> str:
+        return last_language
 
     participant = await ctx.wait_for_participant()
     participant_label = format_participant(participant)
@@ -131,14 +162,26 @@ async def entrypoint(ctx: JobContext) -> None:
         settings,
         vad=ctx.proc.userdata.get("vad"),
         stt=ctx.proc.userdata.get("stt"),
+        llm=ctx.proc.userdata.get("llm"),
+        tts=ctx.proc.userdata.get("tts"),
+    )
+
+    room_input_options = RoomInputOptions(
+        noise_cancellation=ctx.proc.userdata.get("noise_cancellation"),
     )
 
     await session.start(
-        agent=TwypeAgent(),
+        agent=TwypeAgent(
+            thinking_sounds_enabled=settings.THINKING_SOUNDS_ENABLED,
+            thinking_sounds_delay=settings.THINKING_SOUNDS_DELAY,
+            language_getter=get_last_language,
+        ),
         room=ctx.room,
+        room_input_options=room_input_options,
     )
 
     async def handle_transcript_event(ev: object) -> None:
+        nonlocal last_language
         try:
             raw_transcript = getattr(ev, "transcript", None)
             if raw_transcript is None:
@@ -150,10 +193,13 @@ async def entrypoint(ctx: JobContext) -> None:
 
             is_final = bool(getattr(ev, "is_final", False))
             language = str(getattr(ev, "language", settings.STT_LANGUAGE))
+            if is_final and language:
+                last_language = language
 
             if not is_final:
                 await publish_transcript(
                     ctx.room,
+                    role="user",
                     is_final=False,
                     text=cleaned,
                     language=language,
@@ -174,6 +220,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
             await publish_transcript(
                 ctx.room,
+                role="user",
                 is_final=True,
                 text=cleaned,
                 language=language,
@@ -183,9 +230,123 @@ async def entrypoint(ctx: JobContext) -> None:
         except Exception:
             logger.exception("failed to handle transcript event, room=%s", ctx.room.name)
 
+    def _extract_chat_message_text(message: object) -> str:
+        content = getattr(message, "content", None)
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return str(content or "")
+
+        chunks: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                chunks.append(item)
+
+        return "".join(chunks)
+
+    async def handle_assistant_message_event(ev: object) -> None:
+        try:
+            message = getattr(ev, "item", None)
+            if message is None:
+                return
+
+            role = str(getattr(message, "role", ""))
+            if role != "assistant":
+                return
+
+            text = _extract_chat_message_text(message).strip()
+            if not text:
+                return
+
+            message_id = None
+            if db_session_id is not None:
+                inserted_id = await save_agent_response(db_session_id, text)
+                if inserted_id is not None:
+                    message_id = str(inserted_id)
+
+            await publish_transcript(
+                ctx.room,
+                role="assistant",
+                is_final=True,
+                text=text,
+                language=last_language,
+                message_id=message_id,
+            )
+        except Exception:
+            logger.exception("failed to handle assistant message event, room=%s", ctx.room.name)
+
+    async def handle_error_event(ev: object) -> None:
+        try:
+            error = getattr(ev, "error", None)
+            source = getattr(ev, "source", None)
+
+            error_type = type(error).__name__ if error is not None else ""
+            source_type = type(source).__name__ if source is not None else ""
+
+            logger.error(
+                "agent error, room=%s error_type=%s source_type=%s error=%r source=%r",
+                ctx.room.name,
+                error_type,
+                source_type,
+                error,
+                source,
+            )
+
+            def is_llm_related(obj: object | None) -> bool:
+                if obj is None:
+                    return False
+
+                if isinstance(obj, (httpx.TimeoutException, httpx.HTTPError)):
+                    return True
+
+                obj_type = type(obj)
+                name = str(getattr(obj_type, "__name__", "")).lower()
+                module = str(getattr(obj_type, "__module__", "")).lower()
+                if any(token in name for token in ("llm", "openai", "litellm")):
+                    return True
+                if any(token in module for token in ("llm", "openai", "litellm")):
+                    return True
+
+                message = str(obj).lower()
+                return any(
+                    token in message for token in ("timeout", "timed out", "openai", "litellm")
+                )
+
+            is_llm_error = is_llm_related(error) or is_llm_related(source)
+            if not is_llm_error:
+                return
+
+            _llm_error_messages: dict[str, str] = {
+                "ru": "Извините, сервис ответа временно недоступен. Попробуйте ещё раз.",
+                "en": "Sorry, the response service is temporarily unavailable. Please try again.",
+            }
+            error_text = _llm_error_messages.get(last_language, _llm_error_messages["en"])
+
+            await publish_transcript(
+                ctx.room,
+                role="assistant",
+                is_final=True,
+                text=error_text,
+                language=last_language,
+            )
+        except Exception:
+            logger.exception("failed to handle error event, room=%s", ctx.room.name)
+
     @session.on("user_input_transcribed")
     def on_user_input_transcribed(ev: object) -> None:
         task = asyncio.create_task(handle_transcript_event(ev))
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+
+    @session.on("conversation_item_added")
+    def on_conversation_item_added(ev: object) -> None:
+        task = asyncio.create_task(handle_assistant_message_event(ev))
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+
+    @session.on("error")
+    def on_error(ev: object) -> None:
+        task = asyncio.create_task(handle_error_event(ev))
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
 

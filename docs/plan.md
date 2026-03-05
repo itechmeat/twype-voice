@@ -25,13 +25,13 @@
 - [x] **S06. STT integration (Deepgram)**
       Connecting the `livekit-plugins-deepgram` plugin. Streaming speech recognition with interim and final transcripts. Support for Russian and English languages. Extracting sentiment score (-1..1) from Deepgram results. Saving user transcripts to the database (`messages`). Sending interim transcripts to the client via data channel.
 
-- [ ] **S07. LLM integration via LiteLLM Proxy**
+- [x] **S07. LLM integration via LiteLLM Proxy**
       LiteLLM Proxy setup: configuring Gemini Flash-Lite as the primary model and GPT-4.1-mini as fallback. Connecting the OpenAI-compatible `livekit-plugins-openai` plugin to LiteLLM. Basic prompt context (hardcoded for now). Streaming response generation. LiteLLM health check and unavailability handling. Saving agent responses to the database.
 
-- [ ] **S08. TTS integration (Inworld)**
+- [x] **S08. TTS integration (Inworld)**
       Custom TTS plugin for Inworld AI in `apps/agent/src/plugins/`. Streaming speech synthesis from LLM response text. Support for Russian and English languages. Expressiveness and speed parameters. Fallback to ElevenLabs when Inworld is unavailable. The plugin is developed as a module suitable for a PR to the LiveKit Agents repository.
 
-- [ ] **S09. Voice pipeline end-to-end**
+- [x] **S09. Voice pipeline end-to-end**
       Assembling the full voice pipeline: VAD -> Turn Detector -> STT -> LLM -> TTS -> WebRTC audio. Turn Detector setup (end-of-utterance detection): pause thresholds, safety timeout of 3 sec. Input noise suppression. End-to-end streaming between all components. Target voice-to-voice latency ~800 ms. Thinking sounds and TTS fillers during extended processing.
 
 - [ ] **S10. Prompt system from the database**

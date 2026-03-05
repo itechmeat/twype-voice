@@ -37,6 +37,7 @@ async def test_publish_transcript_interim_lossy() -> None:
     payload = json.loads(data.decode("utf-8"))
     assert payload == {
         "type": "transcript",
+        "role": "user",
         "is_final": False,
         "text": "hello",
         "language": "en",
@@ -62,6 +63,7 @@ async def test_publish_transcript_final_reliable_includes_extras() -> None:
 
     payload = json.loads(data.decode("utf-8"))
     assert payload["type"] == "transcript"
+    assert payload["role"] == "user"
     assert payload["is_final"] is True
     assert payload["text"] == "привет"
     assert payload["language"] == "ru"
