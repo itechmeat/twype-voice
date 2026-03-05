@@ -6,7 +6,8 @@ from settings import AgentSettings
 
 
 def build_llm(settings: AgentSettings) -> openai.LLM:
-    base_url = settings.LITELLM_URL.rstrip("/") + "/v1"
+    base = settings.LITELLM_URL.rstrip("/")
+    base_url = base if base.endswith("/v1") else f"{base}/v1"
 
     return openai.LLM(
         base_url=base_url,

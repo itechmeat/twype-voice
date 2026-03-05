@@ -5,9 +5,9 @@ import pytest
 from settings import AgentSettings
 
 
+@pytest.mark.usefixtures("livekit_required_env")
 def test_build_session_passes_pipeline_settings(
     monkeypatch: pytest.MonkeyPatch,
-    livekit_required_env: None,
 ) -> None:
     captured: dict[str, object] = {}
 
@@ -43,9 +43,9 @@ def test_build_session_passes_pipeline_settings(
     assert captured["min_interruption_duration"] == 0.5
 
 
+@pytest.mark.usefixtures("livekit_required_env")
 def test_build_session_disables_false_interruption_timeout_when_zero(
     monkeypatch: pytest.MonkeyPatch,
-    livekit_required_env: None,
 ) -> None:
     captured: dict[str, object] = {}
 
