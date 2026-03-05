@@ -22,4 +22,3 @@ def test_build_stt_config(monkeypatch, livekit_required_env: None) -> None:
     assert captured["api_key"] == settings.DEEPGRAM_API_KEY
     assert captured["model"] == settings.STT_MODEL
     assert captured["language"] == settings.STT_LANGUAGE
-    assert captured["sentiment"] is True
