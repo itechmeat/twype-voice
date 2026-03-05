@@ -3,13 +3,19 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable
-from typing import Any
+from collections.abc import AsyncIterable, Awaitable, Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any, Literal
 
-from livekit.agents import Agent, AgentSession
+from livekit.agents import Agent, AgentSession, llm
 from livekit.agents import tts as livekit_tts
 from livekit.plugins import deepgram, silero
-from prompts import SYSTEM_PROMPT
+from prompts import (
+    FALLBACK_SYSTEM_PROMPT,
+    FALLBACK_TEXT_GUIDANCE,
+    FALLBACK_VOICE_GUIDANCE,
+)
 from settings import AgentSettings
 from stt import build_stt
 from tts import build_tts
@@ -17,15 +23,28 @@ from tts import build_tts
 logger = logging.getLogger("twype-agent")
 
 
-_FILLER_PHRASES_BY_LANGUAGE: dict[str, str] = {
-    "ru": "Хм…",
-    "en": "Hmm…",
-}
+_DEFAULT_FILLER_PHRASE = "Hmm…"
+MODE_ANNOTATION_HISTORY_COUNT = 6
+ModeName = Literal["voice", "text"]
 
 
-def _pick_filler_phrase(language: str | None) -> str:
-    normalized = (language or "").strip().lower()
-    return _FILLER_PHRASES_BY_LANGUAGE.get(normalized) or _FILLER_PHRASES_BY_LANGUAGE["en"]
+@dataclass(slots=True)
+class ModeContext:
+    current_mode: ModeName = "voice"
+    previous_mode: ModeName = "voice"
+    switched_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    def switch_to(self, mode: ModeName) -> None:
+        if mode == self.current_mode:
+            return
+
+        self.previous_mode = self.current_mode
+        self.current_mode = mode
+        self.switched_at = datetime.now(UTC)
+
+
+def _pick_filler_phrase() -> str:
+    return _DEFAULT_FILLER_PHRASE
 
 
 def format_participant(participant: Any | None) -> str:
@@ -110,27 +129,130 @@ class TwypeAgent(Agent):
     def __init__(
         self,
         *,
+        instructions: str = FALLBACK_SYSTEM_PROMPT,
+        mode_voice_guidance: str = FALLBACK_VOICE_GUIDANCE,
+        mode_text_guidance: str = FALLBACK_TEXT_GUIDANCE,
         thinking_sounds_enabled: bool = True,
         thinking_sounds_delay: float = 1.5,
-        language_getter: Callable[[], str] | None = None,
     ) -> None:
-        super().__init__(instructions=SYSTEM_PROMPT)
+        super().__init__(instructions=instructions)
+        self.mode_context = ModeContext()
+        self._mode_voice_guidance = mode_voice_guidance
+        self._mode_text_guidance = mode_text_guidance
         self._thinking_sounds_enabled = thinking_sounds_enabled
         self._thinking_sounds_delay = thinking_sounds_delay
-        self._language_getter = language_getter
+        self._chat_response_publisher: Callable[[str], Awaitable[None]] | None = None
+
+    @property
+    def text_mode_active(self) -> bool:
+        return self.mode_context.current_mode == "text"
+
+    def set_chat_response_publisher(
+        self,
+        publisher: Callable[[str], Awaitable[None]] | None,
+    ) -> None:
+        self._chat_response_publisher = publisher
 
     async def on_enter(self) -> None:
         participant = getattr(getattr(self.session, "room_io", None), "linked_participant", None)
         logger.info("agent entered session, participant=%s", format_participant(participant))
 
+    def _mode_guidance_text(self) -> str:
+        if self.mode_context.current_mode == "text":
+            return self._mode_text_guidance.strip() or FALLBACK_TEXT_GUIDANCE
+        return self._mode_voice_guidance.strip() or FALLBACK_VOICE_GUIDANCE
+
+    def _message_mode(self, message: llm.ChatMessage) -> ModeName:
+        if message.role != "user":
+            return "voice"
+
+        extra = message.extra if isinstance(message.extra, dict) else {}
+        mode = extra.get("mode")
+        if mode in {"voice", "text"}:
+            return mode
+        return "voice"
+
+    def _annotate_user_message(self, message: llm.ChatMessage) -> llm.ChatMessage:
+        annotated = message.model_copy(deep=True)
+        if annotated.role != "user":
+            return annotated
+
+        prefix = f"[{self._message_mode(annotated)}] "
+        updated_content = list(annotated.content)
+        for index, item in enumerate(updated_content):
+            if isinstance(item, str):
+                updated_content[index] = f"{prefix}{item}"
+                annotated.content = updated_content
+                return annotated
+
+        annotated.content = [prefix.rstrip(), *updated_content]
+        return annotated
+
+    def _build_mode_aware_chat_ctx(self, chat_ctx: llm.ChatContext | None) -> llm.ChatContext:
+        source = chat_ctx.copy() if chat_ctx is not None else llm.ChatContext.empty()
+        user_message_indexes = [
+            index
+            for index, item in enumerate(source.items)
+            if isinstance(item, llm.ChatMessage) and item.role == "user"
+        ]
+        annotated_indexes = set(user_message_indexes[-MODE_ANNOTATION_HISTORY_COUNT:])
+
+        items: list[llm.ChatItem] = []
+        merged_into_existing_system = False
+        guidance = self._mode_guidance_text()
+
+        for index, item in enumerate(source.items):
+            if not isinstance(item, llm.ChatMessage):
+                items.append(item)
+                continue
+
+            copied_item = item.model_copy(deep=True)
+
+            if copied_item.role == "system" and not merged_into_existing_system:
+                updated_content = list(copied_item.content)
+                for content_index, content_item in enumerate(updated_content):
+                    if isinstance(content_item, str):
+                        updated_content[content_index] = f"{guidance}\n\n{content_item}"
+                        break
+                else:
+                    updated_content = [guidance, *updated_content]
+
+                copied_item.content = updated_content
+                copied_item.extra = {
+                    **(copied_item.extra if isinstance(copied_item.extra, dict) else {}),
+                    "mode": self.mode_context.current_mode,
+                }
+                merged_into_existing_system = True
+                items.append(copied_item)
+                continue
+
+            if copied_item.role == "user" and index in annotated_indexes:
+                copied_item = self._annotate_user_message(copied_item)
+
+            items.append(copied_item)
+
+        if not merged_into_existing_system:
+            items.insert(
+                0,
+                llm.ChatMessage(
+                    role="system",
+                    content=[guidance],
+                    extra={"mode": self.mode_context.current_mode},
+                ),
+            )
+
+        return llm.ChatContext(items=items)
+
     async def llm_node(self, chat_ctx, tools, model_settings):
-        if not self._thinking_sounds_enabled:
-            passthrough = super().llm_node(chat_ctx, tools, model_settings)
+        mode_aware_chat_ctx = self._build_mode_aware_chat_ctx(chat_ctx)
+
+        if not self._thinking_sounds_enabled or self.text_mode_active:
+            passthrough = super().llm_node(mode_aware_chat_ctx, tools, model_settings)
             if asyncio.iscoroutine(passthrough):
                 return await passthrough
             return passthrough
 
-        result = super().llm_node(chat_ctx, tools, model_settings)
+        result = super().llm_node(mode_aware_chat_ctx, tools, model_settings)
         if asyncio.iscoroutine(result):
             result = await result
 
@@ -154,8 +276,7 @@ class TwypeAgent(Agent):
                 )
 
                 if not done:
-                    language = self._language_getter() if callable(self._language_getter) else None
-                    yield _pick_filler_phrase(language)
+                    yield _pick_filler_phrase()
 
                 try:
                     first_item = await first_task
@@ -173,3 +294,16 @@ class TwypeAgent(Agent):
                         await first_task
 
         return _gen()
+
+    async def tts_node(self, text: AsyncIterable[str], model_settings):
+        if not self.text_mode_active:
+            result = super().tts_node(text, model_settings)
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
+
+        async for chunk in text:
+            if self._chat_response_publisher is not None and chunk:
+                await self._chat_response_publisher(chunk)
+
+        return None

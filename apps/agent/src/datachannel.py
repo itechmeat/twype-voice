@@ -1,11 +1,61 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
+
+logger = logging.getLogger("twype-agent")
 
 
 def _encode_json(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def receive_chat_message(
+    data_packet: Any,
+    *,
+    local_participant_identity: str | None = None,
+) -> str | None:
+    participant = getattr(data_packet, "participant", None)
+    participant_identity = getattr(participant, "identity", None)
+    if (
+        local_participant_identity is not None
+        and isinstance(participant_identity, str)
+        and participant_identity == local_participant_identity
+    ):
+        return None
+
+    raw_data = getattr(data_packet, "data", None)
+    if not isinstance(raw_data, (bytes, bytearray)):
+        logger.warning("ignored malformed data packet without bytes payload")
+        return None
+
+    try:
+        payload = json.loads(bytes(raw_data).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        logger.warning("ignored malformed chat_message payload")
+        return None
+
+    if not isinstance(payload, dict):
+        logger.warning("ignored non-object chat_message payload")
+        return None
+
+    payload_type = payload.get("type")
+    if payload_type != "chat_message":
+        if payload_type not in {"transcript", "chat_response"}:
+            logger.debug("ignored unsupported data channel message type=%r", payload_type)
+        return None
+
+    text = payload.get("text")
+    if not isinstance(text, str):
+        logger.warning("ignored chat_message without text field")
+        return None
+
+    cleaned_text = text.strip()
+    if not cleaned_text:
+        return None
+
+    return cleaned_text
 
 
 async def publish_transcript(
@@ -31,6 +81,28 @@ async def publish_transcript(
             payload["message_id"] = message_id
         if sentiment_raw is not None:
             payload["sentiment_raw"] = sentiment_raw
+
+    await room.local_participant.publish_data(
+        _encode_json(payload),
+        reliable=is_final,
+    )
+
+
+async def publish_chat_response(
+    room: Any,
+    *,
+    text: str,
+    is_final: bool,
+    message_id: str | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "type": "chat_response",
+        "text": text,
+        "is_final": is_final,
+    }
+
+    if is_final and message_id is not None:
+        payload["message_id"] = message_id
 
     await room.local_participant.publish_data(
         _encode_json(payload),

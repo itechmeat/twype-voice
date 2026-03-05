@@ -10,7 +10,7 @@ from agent import (
     build_vad,
     format_participant,
 )
-from datachannel import publish_transcript
+from datachannel import publish_chat_response, publish_transcript, receive_chat_message
 from db import build_engine, build_sessionmaker
 from livekit.agents import (
     AutoSubscribe,
@@ -19,9 +19,19 @@ from livekit.agents import (
     UserStateChangedEvent,
     WorkerOptions,
     cli,
+    llm,
 )
 from livekit.agents.voice.room_io import RoomInputOptions
 from llm import build_llm
+from prompts import (
+    FALLBACK_SYSTEM_PROMPT,
+    FALLBACK_TEXT_GUIDANCE,
+    FALLBACK_VOICE_GUIDANCE,
+    build_instructions,
+    load_prompt_bundle,
+    resolve_prompt_locale,
+    save_config_snapshot,
+)
 from settings import AgentSettings
 from stt import build_stt
 from transcript import (
@@ -119,6 +129,7 @@ async def entrypoint(ctx: JobContext) -> None:
     logger.info("job accepted, room=%s", ctx.room.name)
 
     background_tasks: set[asyncio.Task[None]] = set()
+    text_reply_lock = asyncio.Lock()
 
     try:
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
@@ -128,10 +139,11 @@ async def entrypoint(ctx: JobContext) -> None:
 
     logger.info("connected to room, room=%s", ctx.room.name)
 
-    last_language = settings.STT_LANGUAGE
-
-    def get_last_language() -> str:
-        return last_language
+    last_language = (
+        settings.STT_LANGUAGE
+        if settings.STT_LANGUAGE != "multi"
+        else settings.PROMPT_DEFAULT_LOCALE
+    )
 
     participant = await ctx.wait_for_participant()
     participant_label = format_participant(participant)
@@ -148,6 +160,59 @@ async def entrypoint(ctx: JobContext) -> None:
             "session not found in db; transcript persistence disabled, room=%s",
             ctx.room.name,
         )
+
+    instructions = FALLBACK_SYSTEM_PROMPT
+    prompt_bundle = None
+    db_sessionmaker = ctx.proc.userdata.get("db_sessionmaker")
+    if db_sessionmaker is None:
+        logger.error(
+            "db sessionmaker is not configured; using fallback prompt, room=%s",
+            ctx.room.name,
+        )
+    else:
+        try:
+            prompt_locale = await resolve_prompt_locale(
+                db_sessionmaker,
+                db_session_id,
+                preferred_locale=last_language,
+                default_locale=settings.PROMPT_DEFAULT_LOCALE,
+            )
+            prompt_bundle = await load_prompt_bundle(
+                db_sessionmaker,
+                prompt_locale,
+                default_locale=settings.PROMPT_DEFAULT_LOCALE,
+            )
+            instructions = build_instructions(prompt_bundle.layers)
+            if not instructions.strip():
+                raise RuntimeError("prompt layers are empty")
+            logger.info(
+                "loaded prompt bundle, requested_locale=%s locale_chain=%s matched_layers=%s",
+                prompt_bundle.requested_locale,
+                ",".join(prompt_bundle.locale_chain),
+                len(prompt_bundle.layers),
+            )
+        except Exception:
+            instructions = FALLBACK_SYSTEM_PROMPT
+            prompt_bundle = None
+            logger.exception(
+                "failed to build instructions from db; using fallback, room=%s",
+                ctx.room.name,
+            )
+        else:
+            if db_session_id is None:
+                logger.warning(
+                    "config snapshot skipped because session id is unavailable, room=%s",
+                    ctx.room.name,
+                )
+            else:
+                try:
+                    await save_config_snapshot(db_sessionmaker, db_session_id, prompt_bundle)
+                except Exception:
+                    logger.exception(
+                        "failed to save config snapshot, room=%s session_id=%s",
+                        ctx.room.name,
+                        db_session_id,
+                    )
 
     @ctx.room.on("participant_disconnected")
     def on_participant_disconnected(disconnected_participant) -> None:
@@ -170,12 +235,31 @@ async def entrypoint(ctx: JobContext) -> None:
         noise_cancellation=ctx.proc.userdata.get("noise_cancellation"),
     )
 
-    await session.start(
-        agent=TwypeAgent(
-            thinking_sounds_enabled=settings.THINKING_SOUNDS_ENABLED,
-            thinking_sounds_delay=settings.THINKING_SOUNDS_DELAY,
-            language_getter=get_last_language,
+    agent = TwypeAgent(
+        instructions=instructions,
+        mode_voice_guidance=(
+            prompt_bundle.layers.get("mode_voice_guidance", FALLBACK_VOICE_GUIDANCE)
+            if prompt_bundle is not None
+            else FALLBACK_VOICE_GUIDANCE
         ),
+        mode_text_guidance=(
+            prompt_bundle.layers.get("mode_text_guidance", FALLBACK_TEXT_GUIDANCE)
+            if prompt_bundle is not None
+            else FALLBACK_TEXT_GUIDANCE
+        ),
+        thinking_sounds_enabled=settings.THINKING_SOUNDS_ENABLED,
+        thinking_sounds_delay=settings.THINKING_SOUNDS_DELAY,
+    )
+    agent.set_chat_response_publisher(
+        lambda chunk: publish_chat_response(
+            ctx.room,
+            text=chunk,
+            is_final=False,
+        )
+    )
+
+    await session.start(
+        agent=agent,
         room=ctx.room,
         room_input_options=room_input_options,
     )
@@ -195,6 +279,7 @@ async def entrypoint(ctx: JobContext) -> None:
             language = str(getattr(ev, "language", settings.STT_LANGUAGE))
             if is_final and language:
                 last_language = language
+                agent.mode_context.switch_to("voice")
 
             if not is_final:
                 await publish_transcript(
@@ -214,6 +299,7 @@ async def entrypoint(ctx: JobContext) -> None:
                     db_session_id,
                     cleaned,
                     sentiment_raw,
+                    mode=agent.mode_context.current_mode,
                 )
                 if inserted_id is not None:
                     message_id = str(inserted_id)
@@ -258,20 +344,33 @@ async def entrypoint(ctx: JobContext) -> None:
             if not text:
                 return
 
+            response_mode = agent.mode_context.current_mode
             message_id = None
             if db_session_id is not None:
-                inserted_id = await save_agent_response(db_session_id, text)
+                inserted_id = await save_agent_response(
+                    db_session_id,
+                    text,
+                    mode=response_mode,
+                )
                 if inserted_id is not None:
                     message_id = str(inserted_id)
 
-            await publish_transcript(
-                ctx.room,
-                role="assistant",
-                is_final=True,
-                text=text,
-                language=last_language,
-                message_id=message_id,
-            )
+            if response_mode == "text":
+                await publish_chat_response(
+                    ctx.room,
+                    text=text,
+                    is_final=True,
+                    message_id=message_id,
+                )
+            else:
+                await publish_transcript(
+                    ctx.room,
+                    role="assistant",
+                    is_final=True,
+                    text=text,
+                    language=last_language,
+                    message_id=message_id,
+                )
         except Exception:
             logger.exception("failed to handle assistant message event, room=%s", ctx.room.name)
 
@@ -316,21 +415,59 @@ async def entrypoint(ctx: JobContext) -> None:
             if not is_llm_error:
                 return
 
-            _llm_error_messages: dict[str, str] = {
-                "ru": "Извините, сервис ответа временно недоступен. Попробуйте ещё раз.",
-                "en": "Sorry, the response service is temporarily unavailable. Please try again.",
-            }
-            error_text = _llm_error_messages.get(last_language, _llm_error_messages["en"])
+            error_text = "Sorry, the response service is temporarily unavailable. Please try again."
 
-            await publish_transcript(
-                ctx.room,
-                role="assistant",
-                is_final=True,
-                text=error_text,
-                language=last_language,
-            )
+            if agent.mode_context.current_mode == "text":
+                await publish_chat_response(
+                    ctx.room,
+                    text=error_text,
+                    is_final=True,
+                )
+            else:
+                await publish_transcript(
+                    ctx.room,
+                    role="assistant",
+                    is_final=True,
+                    text=error_text,
+                    language=last_language,
+                )
         except Exception:
             logger.exception("failed to handle error event, room=%s", ctx.room.name)
+
+    async def handle_data_received_event(data_packet: object) -> None:
+        local_participant = getattr(ctx.room, "local_participant", None)
+        local_identity = getattr(local_participant, "identity", None)
+
+        try:
+            text = receive_chat_message(
+                data_packet,
+                local_participant_identity=local_identity,
+            )
+            if text is None:
+                return
+
+            agent.mode_context.switch_to("text")
+
+            if db_session_id is not None:
+                await save_transcript(
+                    db_session_id,
+                    text,
+                    None,
+                    mode=agent.mode_context.current_mode,
+                )
+
+            async with text_reply_lock:
+                speech_handle = session.generate_reply(
+                    user_input=llm.ChatMessage(
+                        role="user",
+                        content=[text],
+                        extra={"mode": agent.mode_context.current_mode},
+                    ),
+                    input_modality="text",
+                )
+                await speech_handle
+        except Exception:
+            logger.exception("failed to handle data packet, room=%s", ctx.room.name)
 
     @session.on("user_input_transcribed")
     def on_user_input_transcribed(ev: object) -> None:
@@ -341,6 +478,12 @@ async def entrypoint(ctx: JobContext) -> None:
     @session.on("conversation_item_added")
     def on_conversation_item_added(ev: object) -> None:
         task = asyncio.create_task(handle_assistant_message_event(ev))
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+
+    @ctx.room.on("data_received")
+    def on_data_received(data_packet: object) -> None:
+        task = asyncio.create_task(handle_data_received_event(data_packet))
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
 

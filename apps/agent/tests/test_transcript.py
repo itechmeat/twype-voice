@@ -104,6 +104,30 @@ async def test_save_transcript_skips_empty(sessionmaker, seeded_session: Session
 
 
 @pytest.mark.asyncio
+async def test_save_transcript_persists_text_mode_without_voice_transcript(
+    sessionmaker,
+    seeded_session: Session,
+) -> None:
+    configure_transcript_store(sessionmaker)
+
+    inserted_id = await save_transcript(
+        seeded_session.id,
+        " Hello ",
+        None,
+        mode="text",
+    )
+    assert inserted_id is not None
+
+    async with sessionmaker() as session:
+        msg = await session.get(Message, inserted_id)
+        assert msg is not None
+        assert msg.mode == "text"
+        assert msg.content == "Hello"
+        assert msg.voice_transcript is None
+        assert msg.sentiment_raw is None
+
+
+@pytest.mark.asyncio
 async def test_save_agent_response_inserts_row(sessionmaker, seeded_session: Session) -> None:
     configure_transcript_store(sessionmaker)
 
@@ -131,6 +155,29 @@ async def test_save_agent_response_skips_empty(sessionmaker, seeded_session: Ses
     async with sessionmaker() as session:
         count = await session.scalar(select(Message).where(Message.session_id == seeded_session.id))
         assert count is None
+
+
+@pytest.mark.asyncio
+async def test_save_agent_response_persists_text_mode_without_voice_transcript(
+    sessionmaker,
+    seeded_session: Session,
+) -> None:
+    configure_transcript_store(sessionmaker)
+
+    inserted_id = await save_agent_response(
+        seeded_session.id,
+        " Hi ",
+        mode="text",
+    )
+    assert inserted_id is not None
+
+    async with sessionmaker() as session:
+        msg = await session.get(Message, inserted_id)
+        assert msg is not None
+        assert msg.mode == "text"
+        assert msg.content == "Hi"
+        assert msg.voice_transcript is None
+        assert msg.sentiment_raw is None
 
 
 @pytest.mark.asyncio

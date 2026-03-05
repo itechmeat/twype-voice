@@ -1,10 +1,258 @@
 from __future__ import annotations
 
-SYSTEM_PROMPT = """You are Twype — a knowledgeable expert assistant.
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from uuid import UUID
+
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+DEFAULT_PROMPT_LOCALE = "en"
+
+PROMPT_LAYER_ORDER = [
+    "system_prompt",
+    "voice_prompt",
+    "language_prompt",
+    "dual_layer_prompt",
+    "emotion_prompt",
+    "crisis_prompt",
+    "rag_prompt",
+    "proactive_prompt",
+]
+MODE_GUIDANCE_KEYS = [
+    "mode_voice_guidance",
+    "mode_text_guidance",
+]
+
+FALLBACK_SYSTEM_PROMPT = """You are Twype, a helpful expert assistant.
 
 Rules:
-- Match the user's language (reply in the same language).
-- Keep responses brief and conversational (2-5 sentences).
-- Be direct and helpful; avoid filler.
-- If you are unsure, say so and ask a clarifying question.
+- Reply in the user's language.
+- Keep responses brief, conversational, and to the point.
+- If you are not confident, say so clearly and ask a clarifying question.
 """
+
+FALLBACK_VOICE_GUIDANCE = (
+    "Current input mode: voice. Reply briefly, naturally, and conversationally. "
+    "Prioritize spoken clarity over structure."
+)
+FALLBACK_TEXT_GUIDANCE = (
+    "Current input mode: text. Reply in more detail, use clear structure when helpful, "
+    "and optimize for readability."
+)
+
+_PROMPT_BUNDLE_QUERY = sa.text(
+    """
+    SELECT key, locale, value, version
+    FROM agent_config
+    WHERE is_active = true
+      AND key IN :keys
+      AND locale IN :locales
+    """
+).bindparams(
+    sa.bindparam("keys", expanding=True),
+    sa.bindparam("locales", expanding=True),
+)
+
+_SESSION_PREFERENCES_QUERY = sa.text(
+    """
+    SELECT users.preferences
+    FROM sessions
+    JOIN users ON users.id = sessions.user_id
+    WHERE sessions.id = :session_id
+    """
+)
+
+_UPDATE_SNAPSHOT_QUERY = sa.text(
+    """
+    UPDATE sessions
+    SET agent_config_snapshot = :snapshot
+    WHERE id = :session_id
+    """
+).bindparams(sa.bindparam("snapshot", type_=JSONB))
+
+
+@dataclass(frozen=True, slots=True)
+class PromptBundle:
+    requested_locale: str
+    locale_chain: tuple[str, ...]
+    layers: dict[str, str]
+    versions: dict[str, int]
+    resolved_locales: dict[str, str]
+
+
+def normalize_locale(locale: str | None, *, default_locale: str = DEFAULT_PROMPT_LOCALE) -> str:
+    raw_locale = (locale or "").strip().replace("_", "-")
+    if not raw_locale or raw_locale.lower() == "multi":
+        return default_locale
+
+    parts = [part for part in raw_locale.split("-") if part]
+    if not parts:
+        return default_locale
+
+    normalized_parts = [parts[0].lower()]
+    for part in parts[1:]:
+        if len(part) == 2 and part.isalpha():
+            normalized_parts.append(part.upper())
+        elif len(part) == 4 and part.isalpha():
+            normalized_parts.append(part.title())
+        else:
+            normalized_parts.append(part)
+
+    return "-".join(normalized_parts)
+
+
+def build_locale_fallback_chain(
+    locale: str | None,
+    *,
+    default_locale: str = DEFAULT_PROMPT_LOCALE,
+) -> tuple[str, ...]:
+    normalized_locale = normalize_locale(locale, default_locale=default_locale)
+    parts = normalized_locale.split("-")
+    chain: list[str] = []
+
+    while parts:
+        candidate = "-".join(parts)
+        if candidate not in chain:
+            chain.append(candidate)
+        parts.pop()
+
+    if default_locale not in chain:
+        chain.append(default_locale)
+
+    return tuple(chain)
+
+
+async def resolve_prompt_locale(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    session_id: UUID | None,
+    *,
+    preferred_locale: str | None,
+    default_locale: str = DEFAULT_PROMPT_LOCALE,
+) -> str:
+    if session_id is not None:
+        async with db_sessionmaker() as session:
+            result = await session.execute(
+                _SESSION_PREFERENCES_QUERY,
+                {"session_id": session_id},
+            )
+            preferences = result.scalar_one_or_none()
+
+        if isinstance(preferences, dict):
+            for key in ("locale", "language"):
+                value = preferences.get(key)
+                if isinstance(value, str) and value.strip():
+                    return normalize_locale(value, default_locale=default_locale)
+
+    return normalize_locale(preferred_locale, default_locale=default_locale)
+
+
+async def load_prompt_bundle(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    locale: str,
+    *,
+    default_locale: str = DEFAULT_PROMPT_LOCALE,
+) -> PromptBundle:
+    locale_chain = build_locale_fallback_chain(locale, default_locale=default_locale)
+    priority_by_locale = {value: index for index, value in enumerate(locale_chain)}
+
+    async with db_sessionmaker() as session:
+        result = await session.execute(
+            _PROMPT_BUNDLE_QUERY,
+            {
+                "keys": [*PROMPT_LAYER_ORDER, *MODE_GUIDANCE_KEYS],
+                "locales": list(locale_chain),
+            },
+        )
+        rows = result.mappings().all()
+
+    selected_rows: dict[str, dict[str, object]] = {}
+    for row in rows:
+        key = str(row["key"])
+        row_locale = normalize_locale(str(row["locale"]), default_locale=default_locale)
+        current_row = selected_rows.get(key)
+        if current_row is None:
+            selected_rows[key] = dict(row)
+            continue
+
+        current_locale = normalize_locale(str(current_row["locale"]), default_locale=default_locale)
+        row_priority = priority_by_locale.get(row_locale)
+        current_priority = priority_by_locale.get(current_locale)
+        if row_priority is not None and (
+            current_priority is None or row_priority < current_priority
+        ):
+            selected_rows[key] = dict(row)
+
+    layers: dict[str, str] = {}
+    versions: dict[str, int] = {}
+    resolved_locales: dict[str, str] = {}
+
+    for key in [*PROMPT_LAYER_ORDER, *MODE_GUIDANCE_KEYS]:
+        row = selected_rows.get(key)
+        if row is None:
+            continue
+        layers[key] = str(row["value"])
+        versions[key] = int(row["version"])
+        resolved_locales[key] = normalize_locale(str(row["locale"]), default_locale=default_locale)
+
+    if not layers:
+        raise RuntimeError(f"no prompt layers found for locale chain {locale_chain}")
+
+    return PromptBundle(
+        requested_locale=normalize_locale(locale, default_locale=default_locale),
+        locale_chain=locale_chain,
+        layers=layers,
+        versions=versions,
+        resolved_locales=resolved_locales,
+    )
+
+
+async def load_prompt_layers(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    locale: str,
+    *,
+    default_locale: str = DEFAULT_PROMPT_LOCALE,
+) -> dict[str, str]:
+    bundle = await load_prompt_bundle(
+        db_sessionmaker,
+        locale,
+        default_locale=default_locale,
+    )
+    return bundle.layers
+
+
+def build_instructions(layers: dict[str, str]) -> str:
+    ordered_layers = [
+        value.strip()
+        for key in PROMPT_LAYER_ORDER
+        if (value := layers.get(key)) and value.strip()
+    ]
+    return "\n\n".join(ordered_layers)
+
+
+async def save_config_snapshot(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    session_id: UUID,
+    prompt_bundle: PromptBundle,
+) -> None:
+    async with db_sessionmaker() as session:
+        snapshot = {
+            **prompt_bundle.layers,
+            "_version": prompt_bundle.versions,
+            "_meta": {
+                "snapshot_at": datetime.now(UTC).isoformat(),
+                "requested_locale": prompt_bundle.requested_locale,
+                "locale_chain": list(prompt_bundle.locale_chain),
+                "resolved_locales": prompt_bundle.resolved_locales,
+            },
+        }
+
+        await session.execute(
+            _UPDATE_SNAPSHOT_QUERY,
+            {
+                "session_id": session_id,
+                "snapshot": snapshot,
+            },
+        )
+        await session.commit()

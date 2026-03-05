@@ -19,6 +19,7 @@ class AgentSettings(BaseSettings):
     DEEPGRAM_API_KEY: str
     STT_LANGUAGE: str = "multi"
     STT_MODEL: str = "nova-3"
+    PROMPT_DEFAULT_LOCALE: str = "en"
 
     DATABASE_URL: str
 
