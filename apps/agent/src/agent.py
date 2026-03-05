@@ -4,8 +4,9 @@ import logging
 from typing import Any
 
 from livekit.agents import Agent, AgentSession
-from livekit.plugins import silero
+from livekit.plugins import deepgram, silero
 from settings import AgentSettings
+from stt import build_stt
 
 logger = logging.getLogger("twype-agent")
 
@@ -31,11 +32,18 @@ def build_vad(settings: AgentSettings) -> silero.VAD:
     )
 
 
-def build_session(settings: AgentSettings, *, vad: silero.VAD | None = None) -> AgentSession:
+def build_session(
+    settings: AgentSettings,
+    *,
+    vad: silero.VAD | None = None,
+    stt: deepgram.STT | None = None,
+) -> AgentSession:
     resolved_vad = vad or build_vad(settings)
+    resolved_stt = stt or build_stt(settings)
 
     return AgentSession(
         vad=resolved_vad,
+        stt=resolved_stt,
         turn_detection="vad",
     )
 

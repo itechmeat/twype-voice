@@ -14,6 +14,12 @@ class AgentSettings(BaseSettings):
     LIVEKIT_API_KEY: str
     LIVEKIT_API_SECRET: str
 
+    DEEPGRAM_API_KEY: str
+    STT_LANGUAGE: str = "multi"
+    STT_MODEL: str = "nova-3"
+
+    DATABASE_URL: str
+
     LOG_LEVEL: str = "INFO"
 
     VAD_ACTIVATION_THRESHOLD: float = Field(default=0.5, ge=0.0, le=1.0)

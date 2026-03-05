@@ -22,7 +22,7 @@
 - [x] **S05. LiveKit Agent: connecting to a room**
       Basic LiveKit Agent in `apps/agent/`: entry point `main.py`, connecting to LiveKit Server via SDK, receiving and dispatching jobs on room creation. The agent connects as a participant to the room and receives the audio stream. Silero VAD for speech detection. At this stage the agent only listens — no STT/LLM/TTS.
 
-- [ ] **S06. STT integration (Deepgram)**
+- [x] **S06. STT integration (Deepgram)**
       Connecting the `livekit-plugins-deepgram` plugin. Streaming speech recognition with interim and final transcripts. Support for Russian and English languages. Extracting sentiment score (-1..1) from Deepgram results. Saving user transcripts to the database (`messages`). Sending interim transcripts to the client via data channel.
 
 - [ ] **S07. LLM integration via LiteLLM Proxy**

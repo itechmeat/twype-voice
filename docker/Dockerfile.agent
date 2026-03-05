@@ -13,14 +13,11 @@ FROM base AS dev
 
 COPY pyproject.toml uv.lock* ./
 COPY apps/api/pyproject.toml apps/api/pyproject.toml
-COPY apps/api/src/__init__.py apps/api/src/__init__.py
+COPY apps/api/src apps/api/src
 COPY apps/agent/pyproject.toml apps/agent/pyproject.toml
 COPY apps/agent/src/__init__.py apps/agent/src/__init__.py
 
 RUN uv sync --frozen --package twype-agent 2>/dev/null || uv sync --package twype-agent
-
-# Cache Silero VAD model files in the image during build.
-RUN uv run --package twype-agent livekit-agents download-files
 
 CMD ["uv", "run", "--package", "twype-agent", "python", "src/main.py", "dev"]
 
@@ -29,14 +26,11 @@ FROM base AS prod
 
 COPY pyproject.toml uv.lock ./
 COPY apps/api/pyproject.toml apps/api/pyproject.toml
-COPY apps/api/src/__init__.py apps/api/src/__init__.py
+COPY apps/api/src apps/api/src
 COPY apps/agent/pyproject.toml apps/agent/pyproject.toml
 COPY apps/agent/src/__init__.py apps/agent/src/__init__.py
 
 RUN uv sync --frozen --package twype-agent
-
-# Cache Silero VAD model files in the image during build.
-RUN uv run --package twype-agent livekit-agents download-files
 
 COPY apps/agent/src ./src
 

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev up down logs lint lint-py lint-web format format-py format-web \
+.PHONY: help install dev dev-up up down logs lint lint-py lint-web format format-py format-web \
         test test-api test-agent test-web clean
 
 help: ## Show this help
@@ -10,8 +10,11 @@ install: ## Install all dependencies (uv + bun)
 	uv sync
 	cd apps/web && bun install
 
-dev: ## Start development environment (docker compose)
+dev: ## Start development environment (foreground, shows logs)
 	docker compose --env-file .env -f docker/docker-compose.dev.yml up
+
+dev-up: ## Start development environment (detached)
+	docker compose --env-file .env -f docker/docker-compose.dev.yml up -d
 
 up: ## Start production environment (docker compose, detached)
 	docker compose --env-file .env -f docker/docker-compose.yml up -d
