@@ -36,13 +36,15 @@ services:
 
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
-    command: --config /app/config.yaml
+    command: --config /app/config.yaml --num_workers 1
     volumes:
       - ../configs/litellm.yaml:/app/config.yaml:ro
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LITELLM_LOG: ERROR
+    mem_limit: 768m
     networks:
       - twype-net
     healthcheck:
@@ -109,7 +111,7 @@ services:
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
       LIVEKIT_URL: ${LIVEKIT_URL}
       DEBUG: "true"
-    command: uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uv run --frozen --package twype-api uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - twype-net
     depends_on:
@@ -137,7 +139,7 @@ services:
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
       INWORLD_API_KEY: ${INWORLD_API_KEY}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
-    command: uv run python src/main.py dev
+    command: uv run --frozen --package twype-agent python src/main.py dev
     networks:
       - twype-net
     depends_on:

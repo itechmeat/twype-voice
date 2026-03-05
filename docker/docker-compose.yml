@@ -37,13 +37,15 @@ services:
 
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
-    command: --config /app/config.yaml
+    command: --config /app/config.yaml --num_workers 2
     volumes:
       - ../configs/litellm.yaml:/app/config.yaml:ro
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LITELLM_LOG: ERROR
+    mem_limit: 1g
     networks:
       - twype-net
     healthcheck:
