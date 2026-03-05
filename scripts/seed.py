@@ -133,7 +133,6 @@ async def seed_agent_config() -> None:
                     index_elements=[AgentConfig.key, AgentConfig.locale],
                     set_={
                         "value": stmt.excluded.value,
-                        "version": stmt.excluded.version,
                         "is_active": stmt.excluded.is_active,
                         "updated_at": sa.text("now()"),
                     },

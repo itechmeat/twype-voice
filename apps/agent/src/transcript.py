@@ -67,7 +67,7 @@ async def save_transcript(
                 mode=mode,
                 content=cleaned_text,
                 voice_transcript=cleaned_text if mode == "voice" else None,
-                sentiment_raw=sentiment_raw,
+                sentiment_raw=sentiment_raw if mode == "voice" else None,
             )
             session.add(message)
             await session.commit()

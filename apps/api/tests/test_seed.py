@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import re
 import sys
 from contextlib import asynccontextmanager
 from types import ModuleType
@@ -16,7 +17,7 @@ async def test_seed_agent_config_is_idempotent(
     passlib_context_module = ModuleType("passlib.context")
 
     class FakeCryptContext:
-        def __init__(self, *args, **kwargs) -> None:
+        def __init__(self, *_args, **_kwargs) -> None:
             return None
 
         def hash(self, plaintext: str) -> str:
@@ -51,3 +52,7 @@ async def test_seed_agent_config_is_idempotent(
 
     assert len(executed_statements) == total_prompt_rows * 2
     assert all("ON CONFLICT" in statement.upper() for statement in executed_statements)
+    assert all(
+        re.search(r"ON\s+CONFLICT\s*\(\s*key\s*,\s*locale\s*\)", statement, re.IGNORECASE)
+        for statement in executed_statements
+    )

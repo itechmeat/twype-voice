@@ -24,6 +24,7 @@ logger = logging.getLogger("twype-agent")
 
 
 _DEFAULT_FILLER_PHRASE = "Hmm…"
+MODE_ANNOTATION_HISTORY_COUNT = 6
 ModeName = Literal["voice", "text"]
 
 
@@ -189,19 +190,56 @@ class TwypeAgent(Agent):
 
     def _build_mode_aware_chat_ctx(self, chat_ctx: llm.ChatContext | None) -> llm.ChatContext:
         source = chat_ctx.copy() if chat_ctx is not None else llm.ChatContext.empty()
-        items: list[llm.ChatItem] = [
-            llm.ChatMessage(
-                role="system",
-                content=[self._mode_guidance_text()],
-                extra={"mode": self.mode_context.current_mode},
-            )
+        user_message_indexes = [
+            index
+            for index, item in enumerate(source.items)
+            if isinstance(item, llm.ChatMessage) and item.role == "user"
         ]
+        annotated_indexes = set(user_message_indexes[-MODE_ANNOTATION_HISTORY_COUNT:])
 
-        for item in source.items:
-            if isinstance(item, llm.ChatMessage):
-                items.append(self._annotate_user_message(item))
-            else:
+        items: list[llm.ChatItem] = []
+        merged_into_existing_system = False
+        guidance = self._mode_guidance_text()
+
+        for index, item in enumerate(source.items):
+            if not isinstance(item, llm.ChatMessage):
                 items.append(item)
+                continue
+
+            copied_item = item.model_copy(deep=True)
+
+            if copied_item.role == "system" and not merged_into_existing_system:
+                updated_content = list(copied_item.content)
+                for content_index, content_item in enumerate(updated_content):
+                    if isinstance(content_item, str):
+                        updated_content[content_index] = f"{guidance}\n\n{content_item}"
+                        break
+                else:
+                    updated_content = [guidance, *updated_content]
+
+                copied_item.content = updated_content
+                copied_item.extra = {
+                    **(copied_item.extra if isinstance(copied_item.extra, dict) else {}),
+                    "mode": self.mode_context.current_mode,
+                }
+                merged_into_existing_system = True
+                items.append(copied_item)
+                continue
+
+            if copied_item.role == "user" and index in annotated_indexes:
+                copied_item = self._annotate_user_message(copied_item)
+
+            items.append(copied_item)
+
+        if not merged_into_existing_system:
+            items.insert(
+                0,
+                llm.ChatMessage(
+                    role="system",
+                    content=[guidance],
+                    extra={"mode": self.mode_context.current_mode},
+                ),
+            )
 
         return llm.ChatContext(items=items)
 
