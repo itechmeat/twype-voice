@@ -11,6 +11,7 @@ def _encode_json(payload: dict[str, Any]) -> bytes:
 async def publish_transcript(
     room: Any,
     *,
+    role: str = "user",
     is_final: bool,
     text: str,
     language: str,
@@ -19,6 +20,7 @@ async def publish_transcript(
 ) -> None:
     payload: dict[str, Any] = {
         "type": "transcript",
+        "role": role,
         "is_final": is_final,
         "text": text,
         "language": language,

@@ -74,3 +74,32 @@ async def save_transcript(
     except Exception:
         logger.exception("failed to persist transcript, session_id=%s", session_id)
         return None
+
+
+async def save_agent_response(session_id: uuid.UUID, text: str) -> uuid.UUID | None:
+    cleaned_text = text.strip()
+    if not cleaned_text:
+        return None
+
+    if _sessionmaker is None:
+        raise RuntimeError("transcript store is not configured")
+
+    message_model, _session_model = _load_models()
+
+    try:
+        async with _sessionmaker() as session:
+            message = message_model(
+                session_id=session_id,
+                role="assistant",
+                mode="voice",
+                content=cleaned_text,
+                voice_transcript=cleaned_text,
+                sentiment_raw=None,
+            )
+            session.add(message)
+            await session.commit()
+            await session.refresh(message)
+            return message.id
+    except Exception:
+        logger.exception("failed to persist agent response, session_id=%s", session_id)
+        return None

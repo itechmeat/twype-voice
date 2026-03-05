@@ -29,7 +29,15 @@ services:
     networks:
       - twype-net
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7880"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:7880",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -48,7 +56,11 @@ services:
     networks:
       - twype-net
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; r=urllib.request.Request('http://localhost:4000/health',headers={'Authorization':'Bearer '+__import__('os').environ['LITELLM_MASTER_KEY']}); urllib.request.urlopen(r)\""]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; r=urllib.request.Request(''http://localhost:4000/health'',headers={''Authorization'':''Bearer ''+__import__(''os'').environ[''LITELLM_MASTER_KEY'']}); urllib.request.urlopen(r)"',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -70,14 +82,27 @@ services:
       livekit:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:80",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
 
   coturn:
     image: coturn/coturn:latest
-    entrypoint: ["/bin/sh", "-c", "sed -e \"s/\\$${TURN_USERNAME}/$TURN_USERNAME/g\" -e \"s/\\$${TURN_PASSWORD}/$TURN_PASSWORD/g\" -e \"s/\\$${EXTERNAL_IP}/$EXTERNAL_IP/g\" /etc/turnserver.conf.tpl > /tmp/turnserver.conf && exec turnserver -c /tmp/turnserver.conf"]
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "sed -e \"s/\\$${TURN_USERNAME}/$TURN_USERNAME/g\" -e \"s/\\$${TURN_PASSWORD}/$TURN_PASSWORD/g\" -e \"s/\\$${EXTERNAL_IP}/$EXTERNAL_IP/g\" /etc/turnserver.conf.tpl > /tmp/turnserver.conf && exec turnserver -c /tmp/turnserver.conf",
+      ]
     volumes:
       - ../configs/coturn/turnserver.conf:/etc/turnserver.conf.tpl:ro
     environment:
@@ -91,7 +116,11 @@ services:
     networks:
       - twype-net
     healthcheck:
-      test: ["CMD-SHELL", "turnutils_stunclient localhost 2>&1 | grep -q 'reflexive addr'"]
+      test:
+        [
+          "CMD-SHELL",
+          "turnutils_stunclient localhost 2>&1 | grep -q 'reflexive addr'",
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -118,7 +147,13 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -135,6 +170,7 @@ services:
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
       LIVEKIT_URL: ${LIVEKIT_URL}
       LITELLM_URL: ${LITELLM_URL}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       DATABASE_URL: ${DATABASE_URL}
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
       INWORLD_API_KEY: ${INWORLD_API_KEY}

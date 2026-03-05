@@ -20,3 +20,8 @@ def livekit_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "DATABASE_URL",
         "postgresql+asyncpg://twype:twype_secret@localhost:5433/twype_test",
     )
+
+    monkeypatch.setenv("LITELLM_URL", "http://litellm:4000")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "litellm_master_key")
+
+    monkeypatch.setenv("INWORLD_API_KEY", "inworld_test_key")
