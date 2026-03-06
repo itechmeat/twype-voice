@@ -20,6 +20,10 @@ from src.knowledge_ingestion.manifest import ManifestError
 logger = logging.getLogger(__name__)
 
 
+class MissingGoogleApiKeyError(RuntimeError):
+    pass
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ingest local knowledge files into PostgreSQL.")
     parser.add_argument(
@@ -33,7 +37,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _require_google_api_key() -> str:
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        raise RuntimeError("GOOGLE_API_KEY is not set")
+        raise MissingGoogleApiKeyError("GOOGLE_API_KEY is not set")
     return api_key
 
 
@@ -51,8 +55,8 @@ async def _run(directory: Path) -> int:
                 session=session,
                 embedding_client=embedding_client,
             )
-    except (ManifestError, RuntimeError) as exc:
-        logger.error(str(exc))
+    except (ManifestError, MissingGoogleApiKeyError) as exc:
+        logger.error("%s", exc)
         return 1
     except Exception:
         logger.exception("Knowledge ingestion failed")

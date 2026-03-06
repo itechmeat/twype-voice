@@ -20,7 +20,7 @@ def default_test_database_url(env: Mapping[str, str] | None = None) -> str:
     values = {**_root_env_values(), **(env if env is not None else os.environ)}
     explicit_test_url = values.get("TEST_DATABASE_URL")
     if explicit_test_url:
-        return _normalize_host_database_url(explicit_test_url)
+        return _validated_test_database_url(explicit_test_url)
 
     base_url = values.get("DATABASE_URL", DEFAULT_DATABASE_URL)
     parsed_url = make_url(_normalize_host_database_url(base_url))
@@ -61,7 +61,10 @@ async def ensure_database_exists(database_url: str) -> None:
                 target_database,
             )
             if not exists:
-                await connection.execute(f'CREATE DATABASE "{quoted_database}"')
+                try:
+                    await connection.execute(f'CREATE DATABASE "{quoted_database}"')
+                except asyncpg.DuplicateDatabaseError:
+                    pass
             _ensured_databases.add(database_url)
             return
         finally:
@@ -101,6 +104,15 @@ def _normalize_host_database_url(database_url: str) -> str:
     if port in (None, 5432):
         port = 5433
     return _render_database_url(parsed_url.set(host="localhost", port=port))
+
+
+def _validated_test_database_url(database_url: str) -> str:
+    normalized_url = _normalize_host_database_url(database_url)
+    parsed_url = make_url(normalized_url)
+    database_name = parsed_url.database or ""
+    if not database_name.endswith(TEST_DATABASE_SUFFIX):
+        raise ValueError("TEST_DATABASE_URL must target a *_test database")
+    return _render_database_url(parsed_url)
 
 
 @lru_cache(maxsize=1)
