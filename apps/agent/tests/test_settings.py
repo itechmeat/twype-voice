@@ -4,6 +4,8 @@ import pytest
 from pydantic import ValidationError
 from settings import AgentSettings
 
+from testsupport import default_test_database_url
+
 
 def test_settings_defaults(livekit_required_env: None) -> None:
     settings = AgentSettings()
@@ -13,6 +15,7 @@ def test_settings_defaults(livekit_required_env: None) -> None:
     assert settings.LLM_MODEL == "gemini-flash-lite"
     assert settings.LLM_TEMPERATURE == 0.7
     assert settings.LLM_MAX_TOKENS == 512
+    assert settings.GOOGLE_API_KEY == "google_test_key"
 
     assert settings.TTS_PROVIDER == "inworld"
     assert settings.INWORLD_API_KEY == "inworld_test_key"
@@ -36,6 +39,10 @@ def test_settings_defaults(livekit_required_env: None) -> None:
     assert settings.MIN_INTERRUPTION_DURATION == 0.5
     assert settings.THINKING_SOUNDS_ENABLED is True
     assert settings.THINKING_SOUNDS_DELAY == 1.5
+    assert settings.RAG_ENABLED is True
+    assert settings.RAG_TOP_K == 5
+    assert settings.RAG_LANGUAGE_BOOST == 1.5
+    assert settings.RAG_EMBEDDING_TIMEOUT == 3.0
 
 
 def test_settings_env_overrides(
@@ -103,17 +110,15 @@ def test_settings_inworld_tuning_overrides(
 
 def test_settings_requires_inworld_api_key_when_inworld(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LIVEKIT_URL", "wss://example.livekit")
-    monkeypatch.setenv("LIVEKIT_API_KEY", "api-key")
-    monkeypatch.setenv("LIVEKIT_API_SECRET", "api-secret")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "api-key-for-tests")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "api-secret-for-tests-with-32-bytes")
     monkeypatch.setenv("DEEPGRAM_API_KEY", "dg_test_key")
-    monkeypatch.setenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://twype:twype_secret@localhost:5433/twype_test",
-    )
+    monkeypatch.setenv("DATABASE_URL", default_test_database_url())
     monkeypatch.setenv("LITELLM_URL", "http://litellm:4000")
     monkeypatch.setenv("LITELLM_MASTER_KEY", "litellm_master_key")
     monkeypatch.setenv("TTS_PROVIDER", "inworld")
     monkeypatch.delenv("INWORLD_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "google_test_key")
 
     with pytest.raises(ValidationError):
         AgentSettings()
@@ -125,6 +130,7 @@ def test_settings_missing_required_values(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.delenv("LIVEKIT_API_SECRET", raising=False)
     monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("LITELLM_URL", raising=False)
     monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
 
@@ -146,5 +152,70 @@ def test_settings_rejects_non_positive_thinking_sounds_delay(
     livekit_required_env: None,
 ) -> None:
     monkeypatch.setenv("THINKING_SOUNDS_DELAY", "0")
+    with pytest.raises(ValidationError):
+        AgentSettings()
+
+
+def test_settings_requires_google_api_key_when_rag_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    livekit_required_env: None,
+) -> None:
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    with pytest.raises(ValidationError):
+        AgentSettings()
+
+
+def test_settings_allows_missing_google_api_key_when_rag_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    livekit_required_env: None,
+) -> None:
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setenv("RAG_ENABLED", "false")
+
+    settings = AgentSettings()
+
+    assert settings.RAG_ENABLED is False
+    assert settings.GOOGLE_API_KEY is None
+
+
+def test_settings_rejects_rag_top_k_out_of_range(
+    monkeypatch: pytest.MonkeyPatch,
+    livekit_required_env: None,
+) -> None:
+    monkeypatch.setenv("RAG_TOP_K", "11")
+
+    with pytest.raises(ValidationError):
+        AgentSettings()
+
+
+def test_settings_rejects_non_positive_rag_top_k(
+    monkeypatch: pytest.MonkeyPatch,
+    livekit_required_env: None,
+) -> None:
+    monkeypatch.setenv("RAG_TOP_K", "0")
+
+    with pytest.raises(ValidationError):
+        AgentSettings()
+
+
+@pytest.mark.parametrize("value", ["0.5", "6.0"])
+def test_settings_rejects_rag_language_boost_out_of_range(
+    monkeypatch: pytest.MonkeyPatch,
+    livekit_required_env: None,
+    value: str,
+) -> None:
+    monkeypatch.setenv("RAG_LANGUAGE_BOOST", value)
+
+    with pytest.raises(ValidationError):
+        AgentSettings()
+
+
+def test_settings_rejects_non_positive_rag_embedding_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    livekit_required_env: None,
+) -> None:
+    monkeypatch.setenv("RAG_EMBEDDING_TIMEOUT", "0")
+
     with pytest.raises(ValidationError):
         AgentSettings()

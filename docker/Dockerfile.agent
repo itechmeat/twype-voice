@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -r app && useradd -r -g app -d /app app
 WORKDIR /app
 RUN chown app:app /app
+ENV PYTHONPATH=/app/apps/api:/app/src
 
 # --- dev target: volume-mount sources, auto-reload ---
 FROM base AS dev

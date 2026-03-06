@@ -71,9 +71,10 @@ twype-voice/
 ├── docker/
 │   ├── Dockerfile.api
 │   ├── Dockerfile.agent
-│   ├── Dockerfile.web
-│   ├── docker-compose.yml        # Production
-│   └── docker-compose.dev.yml    # Development (hot-reload)
+│   └── Dockerfile.web
+│
+├── compose.yaml          # Development Docker Compose entrypoint
+├── compose.prod.yaml     # Production Docker Compose entrypoint
 │
 ├── configs/
 │   ├── livekit.yaml      # LiveKit Server configuration
@@ -430,11 +431,11 @@ What is tested in MVP:
 
 ## 10. Docker Development
 
-### Production (docker-compose.yml)
+### Production (compose.prod.yaml)
 
 Full stack of 7 containers (described in `docs/architecture.md`, section 1). Images are built multi-stage, minimal size.
 
-### Development (docker-compose.dev.yml)
+### Development (compose.yaml)
 
 Differences from production:
 - **apps/api** — source volume mount, uvicorn with `--reload`
@@ -444,7 +445,7 @@ Differences from production:
 - **livekit/coturn/litellm/caddy** — identical to production
 
 ```yaml
-# docker-compose.dev.yml (schematic)
+# compose.yaml (schematic)
 services:
   api:
     build:
@@ -482,10 +483,10 @@ services:
 
 ```bash
 # Development
-docker compose -f docker/docker-compose.dev.yml up
+docker compose up
 
 # Production
-docker compose -f docker/docker-compose.yml up -d
+docker compose -f compose.prod.yaml up -d
 
 # Migrations
 docker compose exec api alembic upgrade head
@@ -510,6 +511,7 @@ All secrets are stored in the `.env` file (never committed). Template — `.env.
 | `LIVEKIT_API_KEY` | LiveKit API key (for token generation) |
 | `LIVEKIT_API_SECRET` | LiveKit API secret |
 | `LIVEKIT_URL` | LiveKit Server URL (internal) |
+| `GOOGLE_API_KEY` | Google API key for direct Gemini embeddings during ingestion |
 
 ### Agent Container
 
@@ -529,7 +531,7 @@ All secrets are stored in the `.env` file (never committed). Template — `.env.
 | Variable | Description |
 |---|---|
 | `GOOGLE_API_KEY` | Google API key (Gemini) |
-| `OPENAI_API_KEY` | OpenAI API key (fallback LLM) |
+| `OPENAI_API_KEY` | OpenAI API key (optional fallback LLM) |
 
 ### LiveKit Container
 

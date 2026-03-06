@@ -11,21 +11,21 @@ install: ## Install all dependencies (uv + bun)
 	cd apps/web && bun install
 
 dev: ## Start development environment (foreground, shows logs)
-	docker compose --env-file .env -f docker/docker-compose.dev.yml up
+	docker compose up
 
 dev-up: ## Start development environment (detached)
-	docker compose --env-file .env -f docker/docker-compose.dev.yml up -d
+	docker compose up -d
 
 up: ## Start production environment (docker compose, detached)
-	docker compose --env-file .env -f docker/docker-compose.yml up -d
+	docker compose -f compose.prod.yaml up -d
 
 down: ## Stop all containers
-	docker compose --env-file .env -f docker/docker-compose.dev.yml down 2>/dev/null; \
-	docker compose --env-file .env -f docker/docker-compose.yml down 2>/dev/null; \
+	docker compose down 2>/dev/null; \
+	docker compose -f compose.prod.yaml down 2>/dev/null; \
 	true
 
 logs: ## Follow container logs
-	docker compose --env-file .env -f docker/docker-compose.dev.yml logs -f
+	docker compose logs -f
 
 # ---------------------------------------------------------------------------
 # Lint

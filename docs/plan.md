@@ -43,10 +43,10 @@
 - [x] **S12. Mode switching: voice <-> text**
       A single dialogue stream when switching between modes. The agent determines the current mode by the type of incoming data (audio track vs data channel). Context Manager maintains a shared history for both modes. When switching to text — the LLM generates detailed responses; when switching to voice — brief, conversational ones.
 
-- [ ] **S13. RAG: knowledge base ingestion**
+- [x] **S13. RAG: knowledge base ingestion**
       Script `scripts/ingest.py`: extracting text from PDF, EPUB, DOCX, audio (transcription). Semantic chunking by meaningful blocks. Metadata enrichment (source_type, title, author, url, section, page_range, language, tags). Embedding generation via LiteLLM. Loading into PostgreSQL: vector column + metadata. Creating an HNSW index and tsvector for full-text search.
 
-- [ ] **S14. RAG: hybrid search at query time**
+- [x] **S14. RAG: hybrid search at query time**
       RAG Engine in the agent: converting the utterance to an embedding, hybrid search (cosine distance pgvector + tsvector full-text + metadata filters). Top-K (3-5) relevant fragments are included in the LLM context along with source metadata. Prioritizing fragments in the user's language without excluding cross-language results.
 
 - [ ] **S15. Dual-layer response (voice + text)**

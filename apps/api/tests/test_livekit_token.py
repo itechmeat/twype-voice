@@ -24,7 +24,7 @@ def test_create_livekit_token_contains_identity_and_room():
     identity = "9b4f0e4b-8c2c-4f8f-9b6a-0d10f3c0c999"
     room_name = "session-11111111-2222-3333-4444-555555555555"
     api_key = "test_api_key"
-    api_secret = "test_api_secret"
+    api_secret = "test_api_secret_with_32_bytes_min"
 
     token = create_livekit_token(identity, room_name, api_key, api_secret)
     assert isinstance(token, str)

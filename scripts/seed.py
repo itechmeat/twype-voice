@@ -1,14 +1,25 @@
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import sys
+from pathlib import Path
 from uuid import UUID
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 import sqlalchemy as sa
 from passlib.context import CryptContext
 from sqlalchemy.dialects.postgresql import insert
 from src.database import session_scope
+from src.knowledge_constants import EMBEDDING_DIMENSION
+from src.knowledge_ingestion.loader import DatabaseLoader, PreparedSource
+from src.knowledge_ingestion.types import EmbeddedChunk, ManifestSource
 from src.models import AgentConfig, TTSConfig, User
 
 logger = logging.getLogger(__name__)
@@ -82,8 +93,60 @@ PROMPT_LAYER_TRANSLATIONS: dict[str, dict[str, str]] = {
             "Current input mode is text. Reply with more detail and stronger structure. "
             "Use short sections or bullets when they improve readability."
         ),
-    }
+    },
 }
+
+SAMPLE_KNOWLEDGE_SOURCE = ManifestSource(
+    file="seed-sample.html",
+    source_type="article",
+    title="Grounding Techniques for Acute Stress",
+    language="en",
+    author="Twype Editorial",
+    url="https://example.local/grounding-techniques",
+    tags=["psychology", "stress", "grounding"],
+)
+
+SAMPLE_KNOWLEDGE_CHUNKS: list[EmbeddedChunk] = [
+    EmbeddedChunk(
+        content=(
+            "Grounding techniques help people return attention to the present moment when acute "
+            "stress, panic, or intrusive thoughts narrow their focus. A simple first step is to "
+            "name five things you can see, four you can touch, three you can hear, two you can "
+            "smell, and one you can taste."
+        ),
+        section="Sensory orientation",
+        page_range=None,
+        language="en",
+        token_count=58,
+        embedding=[((index % 17) + 1) / 1000 for index in range(EMBEDDING_DIMENSION)],
+    ),
+    EmbeddedChunk(
+        content=(
+            "Breathing exercises work best when the pace is slightly slower than the person's "
+            "usual rhythm. One practical pattern is inhale for four counts, pause for one, and "
+            "exhale for six. The longer exhale can reduce physiological arousal without requiring "
+            "special equipment or a quiet room."
+        ),
+        section="Breathing reset",
+        page_range=None,
+        language="en",
+        token_count=54,
+        embedding=[((index % 23) + 2) / 1000 for index in range(EMBEDDING_DIMENSION)],
+    ),
+    EmbeddedChunk(
+        content=(
+            "After the immediate stress wave drops, it is useful to re-establish orientation: "
+            "note where you are, what time it is, and what the next safe action will be. A short "
+            "follow-up plan such as drinking water, texting a trusted person, or stepping outside "
+            "can prevent the person from sliding back into confusion."
+        ),
+        section="Next safe action",
+        page_range=None,
+        language="en",
+        token_count=57,
+        embedding=[((index % 29) + 3) / 1000 for index in range(EMBEDDING_DIMENSION)],
+    ),
+]
 
 
 def _require_database_url() -> None:
@@ -165,6 +228,17 @@ async def seed_tts_config() -> None:
         await session.execute(stmt)
 
 
+async def seed_knowledge_data() -> None:
+    loader = DatabaseLoader()
+    prepared_source = PreparedSource(
+        source=SAMPLE_KNOWLEDGE_SOURCE,
+        chunks=SAMPLE_KNOWLEDGE_CHUNKS,
+    )
+
+    async with session_scope() as session:
+        await loader.load(session, [prepared_source])
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
     _require_database_url()
@@ -173,6 +247,7 @@ async def main() -> None:
     await seed_user()
     await seed_agent_config()
     await seed_tts_config()
+    await seed_knowledge_data()
     logger.info("Seed complete")
 
 

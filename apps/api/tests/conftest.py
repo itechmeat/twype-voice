@@ -5,10 +5,10 @@ import uuid
 from collections.abc import AsyncIterator
 from unittest.mock import patch
 
-os.environ.setdefault("JWT_SECRET", "test-secret-key-for-tests-only")
+os.environ.setdefault("JWT_SECRET", "test-secret-key-for-tests-only-32-bytes-min")
 os.environ.setdefault("RESEND_API_KEY", "re_test_fake")
 os.environ.setdefault("LIVEKIT_API_KEY", "lk_test_api_key")
-os.environ.setdefault("LIVEKIT_API_SECRET", "lk_test_api_secret")
+os.environ.setdefault("LIVEKIT_API_SECRET", "lk_test_api_secret_with_32_bytes_min")
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -16,16 +16,21 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from src.auth.dependencies import get_session
 from src.models.base import Base
 
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL",
-    "postgresql+asyncpg://twype:twype_secret@localhost:5433/twype_test",
+from testsupport import (
+    default_test_database_url,
+    ensure_database_exists,
+    ensure_pgvector_extension,
 )
+
+TEST_DATABASE_URL = default_test_database_url(os.environ)
 
 
 @pytest.fixture
 async def db_engine():
+    await ensure_database_exists(TEST_DATABASE_URL)
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
     async with engine.begin() as conn:
+        await ensure_pgvector_extension(conn)
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     async with engine.begin() as conn:
