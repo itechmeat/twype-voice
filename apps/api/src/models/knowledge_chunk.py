@@ -8,6 +8,8 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.knowledge_constants import EMBEDDING_DIMENSION
+
 from .base import Base
 
 
@@ -24,7 +26,9 @@ class KnowledgeChunk(Base):
     section: Mapped[str | None] = mapped_column(String(500), nullable=True)
     page_range: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(EMBEDDING_DIMENSION), nullable=True
+    )
     search_vector: Mapped[str | None] = mapped_column(TSVECTOR, nullable=True)
 
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

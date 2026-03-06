@@ -151,10 +151,18 @@ async def test_entrypoint_starts_agent_with_db_instructions(
         saved_snapshot["session_id"] = session_id
         saved_snapshot["layers"] = prompt_bundle.layers
 
+    class FakeModeContext:
+        def __init__(self) -> None:
+            self.current_mode = "voice"
+            self.current_language = None
+
+        def set_language(self, language: str | None) -> None:
+            self.current_language = language
+
     class FakeTwypeAgent:
         def __init__(self, **kwargs: object) -> None:
             captured_agent_kwargs.update(kwargs)
-            self.mode_context = SimpleNamespace(current_mode="voice")
+            self.mode_context = FakeModeContext()
 
         def set_chat_response_publisher(self, publisher) -> None:
             self.publisher = publisher

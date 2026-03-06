@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from languages import normalize_language_code
 from livekit.agents import Agent, AgentSession, llm
 from livekit.agents import tts as livekit_tts
 from livekit.plugins import deepgram, silero
@@ -16,6 +17,7 @@ from prompts import (
     FALLBACK_TEXT_GUIDANCE,
     FALLBACK_VOICE_GUIDANCE,
 )
+from rag import RagEngine, format_rag_context
 from settings import AgentSettings
 from stt import build_stt
 from tts import build_tts
@@ -32,6 +34,7 @@ ModeName = Literal["voice", "text"]
 class ModeContext:
     current_mode: ModeName = "voice"
     previous_mode: ModeName = "voice"
+    current_language: str | None = None
     switched_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def switch_to(self, mode: ModeName) -> None:
@@ -41,6 +44,11 @@ class ModeContext:
         self.previous_mode = self.current_mode
         self.current_mode = mode
         self.switched_at = datetime.now(UTC)
+
+    def set_language(self, language: str | None) -> None:
+        normalized = normalize_language_code(language)
+        if normalized:
+            self.current_language = normalized
 
 
 def _pick_filler_phrase() -> str:
@@ -134,6 +142,8 @@ class TwypeAgent(Agent):
         mode_text_guidance: str = FALLBACK_TEXT_GUIDANCE,
         thinking_sounds_enabled: bool = True,
         thinking_sounds_delay: float = 1.5,
+        default_language: str = "en",
+        rag_engine: RagEngine | None = None,
     ) -> None:
         super().__init__(instructions=instructions)
         self.mode_context = ModeContext()
@@ -142,6 +152,8 @@ class TwypeAgent(Agent):
         self._thinking_sounds_enabled = thinking_sounds_enabled
         self._thinking_sounds_delay = thinking_sounds_delay
         self._chat_response_publisher: Callable[[str], Awaitable[None]] | None = None
+        self._default_language = normalize_language_code(default_language) or "en"
+        self.rag_engine = rag_engine
 
     @property
     def text_mode_active(self) -> bool:
@@ -243,8 +255,72 @@ class TwypeAgent(Agent):
 
         return llm.ChatContext(items=items)
 
+    def _last_user_message(self, chat_ctx: llm.ChatContext | None) -> llm.ChatMessage | None:
+        if chat_ctx is None:
+            return None
+
+        for item in reversed(chat_ctx.items):
+            if isinstance(item, llm.ChatMessage) and item.role == "user":
+                return item
+        return None
+
+    def _resolve_rag_language(self, message: llm.ChatMessage | None) -> str | None:
+        if message is not None and isinstance(message.extra, dict):
+            for key in ("language", "locale"):
+                value = message.extra.get(key)
+                normalized = (
+                    normalize_language_code(str(value)) if isinstance(value, str) else None
+                )
+                if normalized:
+                    return normalized
+
+        if self.mode_context.current_language:
+            return self.mode_context.current_language
+        return self._default_language
+
+    async def _inject_rag_context(
+        self,
+        chat_ctx: llm.ChatContext | None,
+        mode_aware_chat_ctx: llm.ChatContext,
+    ) -> llm.ChatContext:
+        if self.rag_engine is None:
+            return mode_aware_chat_ctx
+
+        message = self._last_user_message(chat_ctx)
+        if message is None:
+            return mode_aware_chat_ctx
+
+        raw_text = message.text_content
+        if not raw_text:
+            return mode_aware_chat_ctx
+
+        query_text = raw_text.strip()
+        if not query_text:
+            return mode_aware_chat_ctx
+
+        try:
+            chunks = await self.rag_engine.search(
+                query_text,
+                language=self._resolve_rag_language(message),
+            )
+        except Exception:
+            logger.exception("rag search failed")
+            return mode_aware_chat_ctx
+
+        rag_context = format_rag_context(chunks)
+        if not rag_context:
+            return mode_aware_chat_ctx
+
+        mode_aware_chat_ctx.add_message(
+            role="system",
+            content=rag_context,
+            extra={"rag": True},
+        )
+        return mode_aware_chat_ctx
+
     async def llm_node(self, chat_ctx, tools, model_settings):
         mode_aware_chat_ctx = self._build_mode_aware_chat_ctx(chat_ctx)
+        mode_aware_chat_ctx = await self._inject_rag_context(chat_ctx, mode_aware_chat_ctx)
 
         if not self._thinking_sounds_enabled or self.text_mode_active:
             passthrough = super().llm_node(mode_aware_chat_ctx, tools, model_settings)

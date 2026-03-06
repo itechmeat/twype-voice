@@ -73,16 +73,17 @@ When the user asks to "plan the next story" (or similar), find the first uncheck
 | `agent`    | LiveKit Agents (Python)  | Voice pipeline: VAD → STT → LLM → TTS            |
 | `web`      | React PWA (Vite)         | Client: LiveKit Client SDK + HTTP                |
 | `livekit`  | LiveKit Server (Go)      | SFU media server, data channels                  |
-| `litellm`  | LiteLLM Proxy            | OpenAI-compatible LLM gateway                    |
+| `litellm`  | LiteLLM Proxy            | OpenAI-compatible LLM gateway for chat models    |
 | `postgres` | PostgreSQL 18 + pgvector | All data + RAG embeddings                        |
 | `caddy`    | Caddy 2                  | Reverse proxy + auto SSL                         |
 | `coturn`   | coturn                   | TURN server for NAT traversal                    |
 
 Key data flows:
 
-- **Voice:** Client → WebRTC → LiveKit → Agent (Silero VAD → Deepgram STT → LiteLLM/Gemini → Inworld TTS) → WebRTC → Client
+- **Voice:** Client → WebRTC → LiveKit → Agent (Silero VAD → Deepgram STT → LiteLLM-backed LLM → Inworld TTS) → WebRTC → Client
 - **Text:** Client → LiveKit data channel → Agent (→ LLM) → data channel → Client
 - **REST:** Client → Caddy → FastAPI → PostgreSQL
+- **RAG ingestion:** API container → direct Gemini embeddings → PostgreSQL + pgvector
 
 ## Monorepo Structure
 
@@ -91,7 +92,9 @@ apps/api/          — FastAPI REST API (Python, uv)
 apps/agent/        — LiveKit Agent voice pipeline (Python, uv)
 apps/web/          — React PWA (Bun)
 packages/shared/   — shared types (optional)
-docker/            — Dockerfiles + docker-compose.yml / docker-compose.dev.yml
+docker/            — Dockerfiles
+compose.yaml       — development Docker Compose entrypoint (uses root `.env`)
+compose.prod.yaml  — production Docker Compose entrypoint (uses root `.env`)
 configs/           — livekit.yaml, litellm.yaml, Caddyfile, turnserver.conf
 scripts/           — seed.py, ingest.py, migrate.sh
 ```
@@ -111,10 +114,10 @@ All versions in `docs/specs.md` are **minimums** — never downgrade below them.
 
 ```bash
 # Development
-docker compose -f docker/docker-compose.dev.yml up
+docker compose up
 
 # Production
-docker compose -f docker/docker-compose.yml up -d
+docker compose -f compose.prod.yaml up -d
 
 # Migrations
 docker compose exec api alembic upgrade head
@@ -172,7 +175,14 @@ cd apps/web && bunx vitest
 
 Defined in `.env` (never committed). Template in `.env.example`. Key groups:
 
-- **API:** `DATABASE_URL`, `JWT_SECRET`, `RESEND_API_KEY`, `LIVEKIT_API_KEY/SECRET/URL`
+- **API:** `DATABASE_URL`, `JWT_SECRET`, `RESEND_API_KEY`, `LIVEKIT_API_KEY/SECRET/URL`, `GOOGLE_API_KEY`
 - **Agent:** `LIVEKIT_*`, `LITELLM_URL`, `DATABASE_URL`, `DEEPGRAM_API_KEY`, `INWORLD_API_KEY`, `ELEVENLABS_API_KEY`
-- **LiteLLM:** `GOOGLE_API_KEY`, `OPENAI_API_KEY`
+- **LiteLLM:** `GOOGLE_API_KEY`, `OPENAI_API_KEY` (optional fallback)
 - **coturn:** `TURN_USERNAME`, `TURN_PASSWORD`
+
+## Secrets and Blockers
+
+- The single source of truth for runtime secrets is the root `.env`. Do not create or rely on a second `.env`.
+- If a required key is missing, empty, placeholder-looking, or rejected by the provider, treat this as a hard blocker.
+- In blocker cases, stop further implementation or integration work that depends on that provider and ask the user for a valid key.
+- Do not keep coding around invalid credentials, add fake fallbacks, or mark provider-dependent verification as complete.

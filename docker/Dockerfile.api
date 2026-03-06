@@ -8,6 +8,7 @@ RUN chown app:app /app
 FROM base AS dev
 
 COPY pyproject.toml uv.lock* ./
+COPY scripts/ingest.py scripts/ingest.py
 COPY scripts/seed.py scripts/seed.py
 COPY apps/api/pyproject.toml apps/api/pyproject.toml
 COPY apps/api/alembic.ini apps/api/alembic.ini
@@ -30,6 +31,7 @@ CMD ["uv", "run", "--package", "twype-api", "uvicorn", "src.main:app", "--host",
 FROM base AS prod
 
 COPY pyproject.toml uv.lock ./
+COPY scripts/ingest.py scripts/ingest.py
 COPY scripts/seed.py scripts/seed.py
 COPY apps/api/pyproject.toml apps/api/pyproject.toml
 COPY apps/api/alembic.ini apps/api/alembic.ini

@@ -22,6 +22,7 @@ class AgentSettings(BaseSettings):
     PROMPT_DEFAULT_LOCALE: str = "en"
 
     DATABASE_URL: str
+    GOOGLE_API_KEY: str | None = None
 
     LITELLM_URL: str
     LITELLM_MASTER_KEY: str
@@ -59,8 +60,16 @@ class AgentSettings(BaseSettings):
     THINKING_SOUNDS_ENABLED: bool = True
     THINKING_SOUNDS_DELAY: float = Field(default=1.5, gt=0.0)
 
+    RAG_ENABLED: bool = True
+    RAG_TOP_K: int = Field(default=5, ge=1, le=10)
+    RAG_LANGUAGE_BOOST: float = Field(default=1.5, ge=1.0, le=5.0)
+    RAG_EMBEDDING_TIMEOUT: float = Field(default=3.0, gt=0.0)
+
     @model_validator(mode="after")
-    def _validate_tts_settings(self) -> AgentSettings:
+    def _validate_runtime_settings(self) -> AgentSettings:
+        if self.RAG_ENABLED and not self.GOOGLE_API_KEY:
+            raise ValueError("GOOGLE_API_KEY is required when RAG_ENABLED=true")
+
         if self.TTS_PROVIDER == "inworld" and not self.INWORLD_API_KEY:
             raise ValueError("INWORLD_API_KEY is required when TTS_PROVIDER=inworld")
 

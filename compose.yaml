@@ -1,3 +1,5 @@
+name: twype-voice
+
 services:
   postgres:
     image: pgvector/pgvector:pg18
@@ -17,11 +19,49 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-init:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    command:
+      - /bin/sh
+      - -ceu
+      - |
+        until pg_isready -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+          sleep 1
+        done
+        export PGPASSWORD="$POSTGRES_PASSWORD"
+        role_name="$$(printf '%s' "$POSTGRES_USER" | sed 's/"/""/g')"
+        role_password="$$(printf '%s' "$POSTGRES_PASSWORD" | sed "s/'/''/g")"
+        psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
+          -c "ALTER ROLE \"$$role_name\" WITH PASSWORD '$$role_password'"
+        test_db="$${POSTGRES_DB}_test"
+        test_db_identifier="$$(printf '%s' "$$test_db" | sed 's/"/""/g')"
+        test_db_literal="$$(printf '%s' "$$test_db" | sed "s/'/''/g")"
+        exists="$$(psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA <<EOF
+        SELECT 1
+        FROM pg_database
+        WHERE datname = '$$test_db_literal';
+        EOF
+        )"
+        if [ "$$exists" != "1" ]; then
+          psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
+            -c "CREATE DATABASE \"$$test_db_identifier\" OWNER \"$$role_name\""
+        fi
+    networks:
+      - twype-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   livekit:
     image: livekit/livekit-server:latest
     command: --config /etc/livekit.yaml
     volumes:
-      - ../configs/livekit.yaml:/etc/livekit.yaml:ro
+      - ./configs/livekit.yaml:/etc/livekit.yaml:ro
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     ports:
@@ -46,7 +86,7 @@ services:
     image: ghcr.io/berriai/litellm:main-latest
     command: --config /app/config.yaml --num_workers 1
     volumes:
-      - ../configs/litellm.yaml:/app/config.yaml:ro
+      - ./configs/litellm.yaml:/app/config.yaml:ro
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
@@ -68,7 +108,7 @@ services:
   caddy:
     image: caddy:2-alpine
     volumes:
-      - ../configs/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./configs/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
     ports:
@@ -104,7 +144,7 @@ services:
         "sed -e \"s/\\$${TURN_USERNAME}/$TURN_USERNAME/g\" -e \"s/\\$${TURN_PASSWORD}/$TURN_PASSWORD/g\" -e \"s/\\$${EXTERNAL_IP}/$EXTERNAL_IP/g\" /etc/turnserver.conf.tpl > /tmp/turnserver.conf && exec turnserver -c /tmp/turnserver.conf",
       ]
     volumes:
-      - ../configs/coturn/turnserver.conf:/etc/turnserver.conf.tpl:ro
+      - ./configs/coturn/turnserver.conf:/etc/turnserver.conf.tpl:ro
     environment:
       TURN_USERNAME: ${TURN_USERNAME}
       TURN_PASSWORD: ${TURN_PASSWORD}
@@ -127,25 +167,33 @@ services:
 
   api:
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile.api
       target: dev
     volumes:
-      - ../apps/api/src:/app/src
+      - ./apps/api/alembic.ini:/app/apps/api/alembic.ini
+      - ./apps/api/migrations:/app/apps/api/migrations
+      - ./apps/api/src:/app/src
+      - ./apps/api/tests:/app/tests
+      - ./scripts:/app/scripts
+      - ./testsupport:/app/testsupport
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       JWT_SECRET: ${JWT_SECRET}
       RESEND_API_KEY: ${RESEND_API_KEY}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
       LIVEKIT_URL: ${LIVEKIT_URL}
+      LITELLM_URL: ${LITELLM_URL}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       DEBUG: "true"
     command: uv run --frozen --package twype-api uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - twype-net
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -160,11 +208,13 @@ services:
 
   agent:
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile.agent
       target: dev
     volumes:
-      - ../apps/agent/src:/app/src
+      - ./apps/agent/src:/app/src
+      - ./apps/agent/tests:/app/tests
+      - ./testsupport:/app/testsupport
     environment:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
@@ -173,6 +223,7 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       DATABASE_URL: ${DATABASE_URL}
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       INWORLD_API_KEY: ${INWORLD_API_KEY}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
     command: uv run --frozen --package twype-agent python src/main.py dev
@@ -183,18 +234,18 @@ services:
         condition: service_healthy
       litellm:
         condition: service_healthy
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
 
   web:
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile.web
       target: dev
     volumes:
-      - ../apps/web/src:/app/src
-      - ../apps/web/index.html:/app/index.html
-      - ../apps/web/vite.config.ts:/app/vite.config.ts
+      - ./apps/web/src:/app/src
+      - ./apps/web/index.html:/app/index.html
+      - ./apps/web/vite.config.ts:/app/vite.config.ts
     ports:
       - "5173:5173"
     command: bunx vite --host

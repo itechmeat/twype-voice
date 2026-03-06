@@ -23,21 +23,24 @@ from transcript import (
     save_transcript,
 )
 
+from testsupport import (
+    default_test_database_url,
+    ensure_database_exists,
+    ensure_pgvector_extension,
+)
+
 
 def _test_database_url() -> str:
-    return os.environ.get(
-        "TEST_DATABASE_URL",
-        os.environ.get(
-            "DATABASE_URL",
-            "postgresql+asyncpg://twype:twype_secret@localhost:5433/twype_test",
-        ),
-    )
+    return default_test_database_url(os.environ)
 
 
 @pytest.fixture
 async def db_engine() -> AsyncIterator[AsyncEngine]:
-    engine = create_async_engine(_test_database_url(), echo=False)
+    database_url = _test_database_url()
+    await ensure_database_exists(database_url)
+    engine = create_async_engine(database_url, echo=False)
     async with engine.begin() as conn:
+        await ensure_pgvector_extension(conn)
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     async with engine.begin() as conn:

@@ -32,6 +32,7 @@ from prompts import (
     resolve_prompt_locale,
     save_config_snapshot,
 )
+from rag import RagEngine
 from settings import AgentSettings
 from stt import build_stt
 from transcript import (
@@ -73,8 +74,14 @@ def prewarm(proc: JobProcess) -> None:
 
     engine = build_engine(settings)
     proc.userdata["db_engine"] = engine
-    proc.userdata["db_sessionmaker"] = build_sessionmaker(engine)
-    configure_transcript_store(proc.userdata["db_sessionmaker"])
+    sessionmaker = build_sessionmaker(engine)
+    proc.userdata["db_sessionmaker"] = sessionmaker
+    configure_transcript_store(sessionmaker)
+
+    if settings.RAG_ENABLED:
+        proc.userdata["rag_engine"] = RagEngine(settings, sessionmaker)
+    else:
+        proc.userdata["rag_engine"] = None
 
 
 def _extract_sentiment_raw(ev: object) -> float | None:
@@ -249,7 +256,10 @@ async def entrypoint(ctx: JobContext) -> None:
         ),
         thinking_sounds_enabled=settings.THINKING_SOUNDS_ENABLED,
         thinking_sounds_delay=settings.THINKING_SOUNDS_DELAY,
+        default_language=last_language,
+        rag_engine=ctx.proc.userdata.get("rag_engine"),
     )
+    agent.mode_context.set_language(last_language)
     agent.set_chat_response_publisher(
         lambda chunk: publish_chat_response(
             ctx.room,
@@ -279,6 +289,7 @@ async def entrypoint(ctx: JobContext) -> None:
             language = str(getattr(ev, "language", settings.STT_LANGUAGE))
             if is_final and language:
                 last_language = language
+                agent.mode_context.set_language(language)
                 agent.mode_context.switch_to("voice")
 
             if not is_final:
@@ -447,6 +458,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 return
 
             agent.mode_context.switch_to("text")
+            agent.mode_context.set_language(last_language)
 
             if db_session_id is not None:
                 await save_transcript(

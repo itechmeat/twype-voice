@@ -21,6 +21,7 @@ def test_prewarm_initializes_noise_cancellation_when_enabled(
     monkeypatch.setattr(main_module, "build_engine", lambda _settings: "engine")
     monkeypatch.setattr(main_module, "build_sessionmaker", lambda _engine: "sessionmaker")
     monkeypatch.setattr(main_module, "configure_transcript_store", lambda _sm: None)
+    monkeypatch.setattr(main_module, "RagEngine", lambda _settings, _sessionmaker: "rag-engine")
 
     import livekit.plugins.noise_cancellation as nc
 
@@ -42,6 +43,7 @@ def test_prewarm_initializes_noise_cancellation_when_enabled(
     assert calls["load"] == 1
     assert calls["bvc"] == 1
     assert proc.userdata["noise_cancellation"] == "bvc-options"
+    assert proc.userdata["rag_engine"] == "rag-engine"
 
 
 def test_prewarm_skips_noise_cancellation_when_disabled(
@@ -59,6 +61,7 @@ def test_prewarm_skips_noise_cancellation_when_disabled(
     monkeypatch.setattr(main_module, "build_engine", lambda _settings: "engine")
     monkeypatch.setattr(main_module, "build_sessionmaker", lambda _engine: "sessionmaker")
     monkeypatch.setattr(main_module, "configure_transcript_store", lambda _sm: None)
+    monkeypatch.setattr(main_module, "RagEngine", lambda _settings, _sessionmaker: "rag-engine")
 
     import livekit.plugins.noise_cancellation as nc
 
@@ -75,3 +78,32 @@ def test_prewarm_skips_noise_cancellation_when_disabled(
     main_module.prewarm(proc)  # type: ignore[arg-type]
 
     assert "noise_cancellation" not in proc.userdata
+    assert proc.userdata["rag_engine"] == "rag-engine"
+
+
+def test_prewarm_skips_rag_engine_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    livekit_required_env: None,
+) -> None:
+    monkeypatch.setenv("RAG_ENABLED", "false")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    settings = AgentSettings()
+    monkeypatch.setattr(main_module, "_settings", settings)
+
+    monkeypatch.setattr(main_module, "build_vad", lambda _settings: "vad")
+    monkeypatch.setattr(main_module, "build_stt", lambda _settings: "stt")
+    monkeypatch.setattr(main_module, "build_llm", lambda _settings: "llm")
+    monkeypatch.setattr(main_module, "build_tts", lambda _settings, language=None: "tts")
+    monkeypatch.setattr(main_module, "build_engine", lambda _settings: "engine")
+    monkeypatch.setattr(main_module, "build_sessionmaker", lambda _engine: "sessionmaker")
+    monkeypatch.setattr(main_module, "configure_transcript_store", lambda _sm: None)
+
+    def fail_rag_engine(_settings, _sessionmaker):
+        raise AssertionError("RagEngine should not be initialized when RAG_ENABLED=false")
+
+    monkeypatch.setattr(main_module, "RagEngine", fail_rag_engine)
+
+    proc = SimpleNamespace(userdata={})
+    main_module.prewarm(proc)  # type: ignore[arg-type]
+
+    assert proc.userdata["rag_engine"] is None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from languages import normalize_language_code
 from livekit.agents import tts as livekit_tts
 from livekit.plugins import elevenlabs, inworld
 from settings import AgentSettings
@@ -15,29 +16,8 @@ _ELEVENLABS_VOICE_ID_BY_LANGUAGE: dict[str, str] = {
     "en": "EXAVITQu4vr4xnSDxMaL",
     "ru": "EXAVITQu4vr4xnSDxMaL",
 }
-
-
-def _normalize_language(language: str | None) -> str | None:
-    if language is None:
-        return None
-
-    cleaned = language.strip().lower()
-    if not cleaned:
-        return None
-
-    if cleaned == "multi":
-        return "en"
-
-    for sep in ("-", "_"):
-        if sep in cleaned:
-            cleaned = cleaned.split(sep, 1)[0]
-            break
-
-    return cleaned
-
-
 def build_tts(settings: AgentSettings, language: str | None = None) -> livekit_tts.TTS:
-    normalized_language = _normalize_language(language)
+    normalized_language = normalize_language_code(language, multi="en")
 
     if settings.TTS_PROVIDER == "inworld":
         voice = (

@@ -233,8 +233,8 @@ graph TD
     DOCKER --> DF_API["Dockerfile.api"]
     DOCKER --> DF_AG["Dockerfile.agent"]
     DOCKER --> DF_WEB["Dockerfile.web"]
-    DOCKER --> DC_PROD["docker-compose.yml"]
-    DOCKER --> DC_DEV["docker-compose.dev.yml"]
+    DOCKER --> DC_PROD["compose.prod.yaml"]
+    DOCKER --> DC_DEV["compose.yaml"]
 
     CONFIGS --> C_LK["livekit.yaml"]
     CONFIGS --> C_LLM["litellm.yaml"]
@@ -703,30 +703,28 @@ To improve recognition quality in non-ideal conditions (cafe, street, office), a
 
 Expert materials go through five processing stages:
 
-1. **Text extraction** from source formats: PDF, EPUB, DOCX, audio (via transcription).
+1. **Text extraction** from source formats: PDF, EPUB, DOCX, and HTML local files.
 2. **Semantic chunking** — splitting by semantic blocks (paragraphs, sections), not by fixed token count. Prevents breaking cause-and-effect relationships — important for medical content where recommendations and contraindications must not be separated.
 3. **Metadata enrichment** — `source_type` (book, video, podcast, article, post), `title`, `author`, `url`, `section` (chapter, timestamp), `page_range`, `language`, `tags`.
-4. **Embedding generation** — via an embedding model (options: OpenAI text-embedding-3-small, Cohere embed-v4, open-source via Ollama). The model is connected through LiteLLM.
+4. **Embedding generation** — via direct Gemini embeddings (`gemini-embedding-001`, 1536 dimensions) from the API container.
 5. **Loading into PostgreSQL** — embeddings (vector column) + metadata + HNSW index for ANN search.
 
 ```mermaid
 flowchart LR
     subgraph SOURCES["Source Materials"]
         PDF["PDF / EPUB /<br/>DOCX"]
-        AUDIO["Podcasts /<br/>Interviews"]
         WEB["Articles /<br/>Posts"]
     end
 
     subgraph EXTRACT["Text Extraction"]
         PARSER["Parsers<br/>(PDF, EPUB, DOCX)"]
-        TRANSCRIBE["Transcription<br/>(audio → text)"]
         SCRAPER["Extraction<br/>(HTML → text)"]
     end
 
     subgraph PROCESS["Processing"]
         CHUNK["Semantic<br/>Chunking<br/>(by semantic blocks)"]
         META["Metadata Enrichment<br/>source_type, title, author,<br/>url, section, page_range,<br/>language, tags"]
-        EMBED["Embedding Generation<br/>(embedding model<br/>via LiteLLM)"]
+        EMBED["Embedding Generation<br/>(direct Gemini API)"]
     end
 
     subgraph STORE["Storage"]
@@ -736,11 +734,9 @@ flowchart LR
     end
 
     PDF --> PARSER
-    AUDIO --> TRANSCRIBE
     WEB --> SCRAPER
 
     PARSER --> CHUNK
-    TRANSCRIBE --> CHUNK
     SCRAPER --> CHUNK
 
     CHUNK --> META --> EMBED

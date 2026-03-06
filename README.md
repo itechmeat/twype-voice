@@ -12,16 +12,17 @@ Interactive AI agent for expert consultations (medicine, psychology, nutrition).
 | `agent`    | LiveKit Agents (Python)  | Voice pipeline: VAD → STT → LLM → TTS           |
 | `web`      | React PWA (Vite)         | Client: LiveKit Client SDK + HTTP                |
 | `livekit`  | LiveKit Server (Go)      | SFU media server, data channels                  |
-| `litellm`  | LiteLLM Proxy            | OpenAI-compatible LLM gateway                    |
+| `litellm`  | LiteLLM Proxy            | OpenAI-compatible LLM gateway for chat models    |
 | `postgres` | PostgreSQL 18 + pgvector | All data + RAG embeddings                        |
 | `caddy`    | Caddy 2                  | Reverse proxy + auto SSL                         |
 | `coturn`   | coturn                   | TURN server for NAT traversal                    |
 
 ### Data Flows
 
-- **Voice:** Client → WebRTC → LiveKit → Agent (Silero VAD → Deepgram STT → LiteLLM/Gemini → Inworld TTS) → Client
+- **Voice:** Client → WebRTC → LiveKit → Agent (Silero VAD → Deepgram STT → LiteLLM-backed LLM → Inworld TTS) → Client
 - **Text:** Client → LiveKit data channel → Agent → LLM → Client
 - **REST:** Client → Caddy → FastAPI → PostgreSQL
+- **RAG ingestion:** API container → direct Gemini embeddings → PostgreSQL + pgvector
 
 ## Tech Stack
 
@@ -41,7 +42,9 @@ apps/api/          — FastAPI REST API (Python, uv)
 apps/agent/        — LiveKit Agent voice pipeline (Python, uv)
 apps/web/          — React PWA (Bun, Vite)
 packages/shared/   — shared types (optional)
-docker/            — Dockerfiles + docker-compose.yml / docker-compose.dev.yml
+docker/            — Dockerfiles
+compose.yaml       — Development Docker Compose entrypoint
+compose.prod.yaml  — Production Docker Compose entrypoint
 configs/           — livekit.yaml, litellm.yaml, Caddyfile, turnserver.conf
 scripts/           — seed.py, ingest.py, migrate.sh
 docs/              — project documentation
@@ -82,14 +85,18 @@ make dev                # start dev environment
 
 Defined in `.env` (never committed). Template: `.env.example`.
 
+If a required key is missing or invalid, treat it as a blocker. Do not continue development,
+container verification, or provider integration with placeholder values. Replace the key in
+the root `.env`, then recreate the affected services with Docker Compose.
+
 **API:**
-`DATABASE_URL`, `JWT_SECRET`, `RESEND_API_KEY`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`
+`DATABASE_URL`, `JWT_SECRET`, `RESEND_API_KEY`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `GOOGLE_API_KEY`
 
 **Agent:**
 `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `LITELLM_URL`, `DATABASE_URL`, `DEEPGRAM_API_KEY`, `INWORLD_API_KEY`, `ELEVENLABS_API_KEY`
 
 **LiteLLM:**
-`GOOGLE_API_KEY`, `OPENAI_API_KEY`
+`GOOGLE_API_KEY`, `OPENAI_API_KEY` (optional fallback model)
 
 **coturn:**
 `TURN_USERNAME`, `TURN_PASSWORD`
