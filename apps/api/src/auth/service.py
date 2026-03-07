@@ -65,7 +65,13 @@ async def _get_user_by_id(user_id: uuid.UUID, session: AsyncSession) -> User:
     return user
 
 
-async def register_user(email: str, password: str, session: AsyncSession) -> None:
+async def register_user(
+    email: str,
+    password: str,
+    session: AsyncSession,
+    *,
+    locale: str | None = None,
+) -> None:
     user = User(
         email=email,
         password_hash=await _hash_password(password),
@@ -80,7 +86,7 @@ async def register_user(email: str, password: str, session: AsyncSession) -> Non
         await session.rollback()
         raise EmailAlreadyRegisteredError from exc
 
-    await send_verification_code(user.email, user.verification_code)
+    await send_verification_code(user.email, user.verification_code, locale=locale)
 
 
 async def verify_user(email: str, code: str, session: AsyncSession) -> TokenResponse:

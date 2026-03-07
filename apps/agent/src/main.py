@@ -12,11 +12,18 @@ from agent import (
 )
 from datachannel import (
     publish_chat_response,
+    publish_emotional_state,
+    publish_proactive_nudge,
     publish_structured_response,
     publish_transcript,
     receive_chat_message,
 )
 from db import build_engine, build_sessionmaker
+from emotional_analyzer import (
+    build_emotional_state,
+    estimate_circumplex,
+    refine_with_llm,
+)
 from livekit.agents import (
     AutoSubscribe,
     JobContext,
@@ -35,8 +42,9 @@ from prompts import (
     resolve_prompt_locale,
     save_config_snapshot,
 )
-from rag import RagEngine
+from rag import RagEngine, RagError
 from settings import AgentSettings
+from silence_timer import SilenceTimer
 from stt import build_stt
 from transcript import (
     configure_transcript_store,
@@ -45,6 +53,8 @@ from transcript import (
     save_transcript,
 )
 from tts import build_tts
+
+from src.localization import translate
 
 logger = logging.getLogger("twype-agent")
 
@@ -138,7 +148,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     logger.info("job accepted, room=%s", ctx.room.name)
 
-    background_tasks: set[asyncio.Task[None]] = set()
+    background_tasks: set[asyncio.Task[object]] = set()
     text_reply_lock = asyncio.Lock()
 
     try:
@@ -196,6 +206,8 @@ async def entrypoint(ctx: JobContext) -> None:
     @ctx.room.on("participant_disconnected")
     def on_participant_disconnected(disconnected_participant) -> None:
         if getattr(disconnected_participant, "identity", None) == participant.identity:
+            if silence_timer is not None:
+                silence_timer.stop()
             logger.info(
                 "participant left, room=%s participant=%s",
                 ctx.room.name,
@@ -223,6 +235,82 @@ async def entrypoint(ctx: JobContext) -> None:
         default_language=last_language,
         rag_engine=ctx.proc.userdata.get("rag_engine"),
     )
+    emotion_refinement_task: asyncio.Task[None] | None = None
+    emotion_analysis_revision = 0
+
+    proactive_prompt_template = prompt_bundle.layers.get("proactive_prompt", "")
+
+    def _build_emotional_context_summary() -> str:
+        state = agent.current_emotional_state
+        if state is None:
+            return "neutral"
+        parts = [state.quadrant]
+        if state.trend_valence != "stable":
+            parts.append(f"valence {state.trend_valence}")
+        if state.trend_arousal != "stable":
+            parts.append(f"arousal {state.trend_arousal}")
+        return ", ".join(parts)
+
+    def _render_proactive_prompt(proactive_type: str) -> str:
+        if not proactive_prompt_template:
+            return ""
+        try:
+            return proactive_prompt_template.format_map(
+                {
+                    "proactive_type": proactive_type,
+                    "emotional_context": _build_emotional_context_summary(),
+                }
+            )
+        except (KeyError, ValueError, IndexError):
+            logger.warning("failed to render proactive prompt template")
+            return proactive_prompt_template
+
+    proactive_in_progress = False
+
+    async def _handle_proactive_timeout(proactive_type: str) -> None:
+        nonlocal proactive_in_progress
+        if proactive_in_progress:
+            return
+        try:
+            rendered_prompt = _render_proactive_prompt(proactive_type)
+            if not rendered_prompt:
+                return
+
+            await publish_proactive_nudge(
+                ctx.room,
+                proactive_type=proactive_type,
+            )
+
+            proactive_in_progress = True
+            await session.generate_reply(
+                user_input=llm.ChatMessage(
+                    role="user",
+                    content=[rendered_prompt],
+                    extra={"mode": agent.mode_context.current_mode, "proactive": True},
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "failed to handle proactive %s, room=%s", proactive_type, ctx.room.name
+            )
+        finally:
+            proactive_in_progress = False
+
+    async def _handle_short_timeout() -> None:
+        await _handle_proactive_timeout("follow_up")
+
+    async def _handle_long_timeout() -> None:
+        await _handle_proactive_timeout("extended_silence")
+
+    silence_timer: SilenceTimer | None = None
+    if settings.PROACTIVE_ENABLED:
+        silence_timer = SilenceTimer(
+            short_timeout=settings.PROACTIVE_SHORT_TIMEOUT,
+            long_timeout=settings.PROACTIVE_LONG_TIMEOUT,
+            on_short_timeout=_handle_short_timeout,
+            on_long_timeout=_handle_long_timeout,
+        )
+
     agent.mode_context.set_language(last_language)
     agent.set_chat_response_publisher(
         lambda chunk: publish_chat_response(
@@ -252,9 +340,135 @@ async def entrypoint(ctx: JobContext) -> None:
         room_input_options=room_input_options,
     )
 
+    def _gather_recent_context(limit: int = 5) -> list[dict[str, str]]:
+        chat_ctx = getattr(agent, "chat_ctx", None)
+        if chat_ctx is None:
+            return []
+
+        items = getattr(chat_ctx, "items", None)
+        if not items:
+            return []
+
+        messages: list[dict[str, str]] = []
+        for item in items:
+            if not isinstance(item, llm.ChatMessage):
+                continue
+            if item.role not in ("user", "assistant"):
+                continue
+            text_content = getattr(item, "text_content", None) or ""
+            if text_content.strip():
+                messages.append({"role": item.role, "content": text_content.strip()})
+
+        return messages[-limit:]
+
+    async def _publish_emotional_state_update(
+        *,
+        message_id: str | None,
+        is_refined: bool,
+    ) -> None:
+        state = agent.current_emotional_state
+        if state is None:
+            return
+
+        await publish_emotional_state(
+            ctx.room,
+            quadrant=state.quadrant,
+            valence=state.valence,
+            arousal=state.arousal,
+            trend_valence=state.trend_valence,
+            trend_arousal=state.trend_arousal,
+            is_refined=is_refined,
+            message_id=message_id,
+        )
+
+    async def _refine_emotional_state(
+        *,
+        revision: int,
+        text: str,
+        fast_estimate: tuple[float, float],
+        context_messages: list[dict[str, str]],
+        trends: tuple[str, str],
+        sentiment_raw: float | None,
+        message_id: str | None,
+    ) -> None:
+        nonlocal emotion_analysis_revision
+
+        try:
+            refined = await refine_with_llm(
+                text,
+                fast_estimate,
+                context_messages,
+                trends,
+                base_url=settings.LITELLM_URL.rstrip("/"),
+                api_key=settings.LITELLM_MASTER_KEY,
+                model=settings.EMOTION_LLM_MODEL or settings.LLM_MODEL,
+            )
+            if refined is None or revision != emotion_analysis_revision:
+                return
+
+            agent.emotional_trend_tracker.replace_latest_snapshot(refined[0], refined[1])
+            agent.current_emotional_state = build_emotional_state(
+                refined[0],
+                refined[1],
+                sentiment_raw,
+                agent.emotional_trend_tracker,
+                is_refined=True,
+            )
+            await _publish_emotional_state_update(message_id=message_id, is_refined=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("failed to refine emotional state, room=%s", ctx.room.name)
+
+    async def _run_emotional_analysis(
+        text: str,
+        sentiment_raw: float | None,
+        fast_estimate: tuple[float, float],
+        message_id: str | None,
+    ) -> None:
+        nonlocal emotion_analysis_revision, emotion_refinement_task
+
+        if emotion_refinement_task is not None and not emotion_refinement_task.done():
+            emotion_refinement_task.cancel()
+
+        emotion_analysis_revision += 1
+        revision = emotion_analysis_revision
+
+        valence, arousal = fast_estimate
+        agent.emotional_trend_tracker.add_snapshot(valence, arousal)
+
+        state = build_emotional_state(
+            valence,
+            arousal,
+            sentiment_raw,
+            agent.emotional_trend_tracker,
+        )
+        agent.current_emotional_state = state
+
+        await _publish_emotional_state_update(message_id=message_id, is_refined=False)
+
+        trends = agent.emotional_trend_tracker.get_trends()
+        context_messages = _gather_recent_context()
+        emotion_refinement_task = asyncio.create_task(
+            _refine_emotional_state(
+                revision=revision,
+                text=text,
+                fast_estimate=fast_estimate,
+                context_messages=context_messages,
+                trends=trends,
+                sentiment_raw=sentiment_raw,
+                message_id=message_id,
+            )
+        )
+        background_tasks.add(emotion_refinement_task)
+        emotion_refinement_task.add_done_callback(background_tasks.discard)
+
     async def handle_transcript_event(ev: object) -> None:
         nonlocal last_language
         try:
+            if silence_timer is not None:
+                silence_timer.reset()
+
             raw_transcript = getattr(ev, "transcript", None)
             if raw_transcript is None:
                 raw_transcript = getattr(ev, "text", "")
@@ -283,12 +497,16 @@ async def entrypoint(ctx: JobContext) -> None:
             sentiment_raw = _extract_sentiment_raw(ev)
             message_id = None
 
+            fast_v, fast_a = estimate_circumplex(sentiment_raw, cleaned)
+
             if db_session_id is not None:
                 inserted_id = await save_transcript(
                     db_session_id,
                     cleaned,
                     sentiment_raw,
                     mode=agent.mode_context.current_mode,
+                    valence=fast_v,
+                    arousal=fast_a,
                 )
                 if inserted_id is not None:
                     message_id = str(inserted_id)
@@ -302,6 +520,8 @@ async def entrypoint(ctx: JobContext) -> None:
                 message_id=message_id,
                 sentiment_raw=sentiment_raw,
             )
+
+            await _run_emotional_analysis(cleaned, sentiment_raw, (fast_v, fast_a), message_id)
         except Exception:
             logger.exception("failed to handle transcript event, room=%s", ctx.room.name)
 
@@ -422,25 +642,31 @@ async def entrypoint(ctx: JobContext) -> None:
 
                 if isinstance(obj, (httpx.TimeoutException, httpx.HTTPError)):
                     return True
+                if isinstance(obj, RagError):
+                    return True
 
                 obj_type = type(obj)
                 name = str(getattr(obj_type, "__name__", "")).lower()
                 module = str(getattr(obj_type, "__module__", "")).lower()
-                if any(token in name for token in ("llm", "openai", "litellm")):
+                if any(token in name for token in ("llm", "openai", "litellm", "rag")):
                     return True
-                if any(token in module for token in ("llm", "openai", "litellm")):
+                if any(token in module for token in ("llm", "openai", "litellm", "rag")):
                     return True
 
                 message = str(obj).lower()
                 return any(
-                    token in message for token in ("timeout", "timed out", "openai", "litellm")
+                    token in message
+                    for token in ("timeout", "timed out", "openai", "litellm", "rag")
                 )
 
             is_llm_error = is_llm_related(error) or is_llm_related(source)
             if not is_llm_error:
                 return
 
-            error_text = "Sorry, the response service is temporarily unavailable. Please try again."
+            error_text = translate(
+                "agent.response_service_unavailable",
+                locale=last_language,
+            )
 
             if agent.mode_context.current_mode == "text":
                 await publish_chat_response(
@@ -471,16 +697,28 @@ async def entrypoint(ctx: JobContext) -> None:
             if text is None:
                 return
 
+            if silence_timer is not None:
+                silence_timer.reset()
+
             agent.mode_context.switch_to("text")
             agent.mode_context.set_language(last_language)
 
+            fast_v, fast_a = estimate_circumplex(None, text)
+            text_message_id: str | None = None
+
             if db_session_id is not None:
-                await save_transcript(
+                inserted_id = await save_transcript(
                     db_session_id,
                     text,
                     None,
                     mode=agent.mode_context.current_mode,
+                    valence=fast_v,
+                    arousal=fast_a,
                 )
+                if inserted_id is not None:
+                    text_message_id = str(inserted_id)
+
+            await _run_emotional_analysis(text, None, (fast_v, fast_a), text_message_id)
 
             async with text_reply_lock:
                 speech_handle = session.generate_reply(
@@ -503,6 +741,8 @@ async def entrypoint(ctx: JobContext) -> None:
 
     @session.on("agent_speech_committed")
     def on_agent_speech_committed(ev: object) -> None:
+        if silence_timer is not None and not proactive_in_progress:
+            silence_timer.reset()
         task = asyncio.create_task(handle_assistant_message_event(ev))
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
@@ -522,6 +762,8 @@ async def entrypoint(ctx: JobContext) -> None:
     @session.on("user_state_changed")
     def on_user_state_changed(ev: UserStateChangedEvent) -> None:
         if ev.new_state == "speaking":
+            if silence_timer is not None:
+                silence_timer.reset()
             logger.debug(
                 "vad speech_start, room=%s participant=%s",
                 ctx.room.name,

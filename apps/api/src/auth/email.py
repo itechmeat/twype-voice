@@ -5,8 +5,17 @@ import os
 
 import resend
 
+from src.localization import translate
 
-async def send_verification_code(email: str, code: str) -> None:
+VERIFICATION_CODE_TTL_MINUTES = 10
+
+
+async def send_verification_code(
+    email: str,
+    code: str,
+    *,
+    locale: str | None = None,
+) -> None:
     api_key = os.environ.get("RESEND_API_KEY")
     if not api_key:
         raise RuntimeError("RESEND_API_KEY is not set")
@@ -19,10 +28,14 @@ async def send_verification_code(email: str, code: str) -> None:
         {
             "from": from_address,
             "to": [email],
-            "subject": "Twype — verification code",
-            "html": (
-                f"<p>Your verification code: <strong>{code}</strong></p>"
-                "<p>The code is valid for 10 minutes.</p>"
+            "subject": translate("auth.email_verification_subject", locale=locale),
+            "html": translate(
+                "auth.email_verification_html",
+                locale=locale,
+                params={
+                    "code": code,
+                    "ttl_minutes": VERIFICATION_CODE_TTL_MINUTES,
+                },
             ),
         },
     )

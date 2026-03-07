@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from contextlib import suppress
 from functools import lru_cache
 from pathlib import Path
 
@@ -61,10 +62,8 @@ async def ensure_database_exists(database_url: str) -> None:
                 target_database,
             )
             if not exists:
-                try:
+                with suppress(asyncpg.DuplicateDatabaseError):
                     await connection.execute(f'CREATE DATABASE "{quoted_database}"')
-                except asyncpg.DuplicateDatabaseError:
-                    pass
             _ensured_databases.add(database_url)
             return
         finally:

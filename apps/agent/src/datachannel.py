@@ -110,6 +110,56 @@ async def publish_chat_response(
     )
 
 
+async def publish_emotional_state(
+    room: Any,
+    *,
+    quadrant: str,
+    valence: float,
+    arousal: float,
+    trend_valence: str,
+    trend_arousal: str,
+    is_refined: bool = False,
+    message_id: str | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "type": "emotional_state",
+        "quadrant": quadrant,
+        "valence": valence,
+        "arousal": arousal,
+        "trend_valence": trend_valence,
+        "trend_arousal": trend_arousal,
+        "is_refined": is_refined,
+    }
+
+    if message_id is not None:
+        payload["message_id"] = message_id
+
+    await room.local_participant.publish_data(
+        _encode_json(payload),
+        reliable=True,
+    )
+
+
+async def publish_proactive_nudge(
+    room: Any,
+    *,
+    proactive_type: str,
+    message_id: str | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "type": "proactive_nudge",
+        "proactive_type": proactive_type,
+    }
+
+    if message_id is not None:
+        payload["message_id"] = message_id
+
+    await room.local_participant.publish_data(
+        _encode_json(payload),
+        reliable=True,
+    )
+
+
 async def publish_structured_response(
     room: Any,
     *,

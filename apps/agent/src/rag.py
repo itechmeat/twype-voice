@@ -22,6 +22,19 @@ _VECTOR_LIMIT = 20
 _TEXT_LIMIT = 20
 _RRF_K = 60
 
+
+class RagError(RuntimeError):
+    """Base error for RAG failures."""
+
+
+class RagEmbeddingError(RagError):
+    """Embedding generation failed."""
+
+
+class RagSearchError(RagError):
+    """Hybrid search failed."""
+
+
 HYBRID_SEARCH_SQL = sa.text(
     """
     WITH query_input AS (
@@ -152,12 +165,12 @@ class RagEngine:
 
         try:
             embeddings = await self._embedding_client.embed_inputs([EmbeddingInput(text=cleaned)])
-        except Exception:
+        except Exception as exc:
             logger.exception("failed to generate query embedding")
-            return None
+            raise RagEmbeddingError("query embedding generation failed") from exc
 
         if not embeddings or not embeddings[0]:
-            return None
+            raise RagEmbeddingError("query embedding response was empty")
         return embeddings[0]
 
     async def search(self, query_text: str, language: str | None) -> list[RagChunk]:
@@ -181,9 +194,9 @@ class RagEngine:
         try:
             async with self._sessionmaker() as session:
                 result = await session.execute(HYBRID_SEARCH_SQL, params)
-        except Exception:
+        except Exception as exc:
             logger.exception("failed to execute hybrid search")
-            return []
+            raise RagSearchError("hybrid search execution failed") from exc
 
         try:
             chunks: list[RagChunk] = []
@@ -202,9 +215,9 @@ class RagEngine:
                         score=float(row["score"]),
                     )
                 )
-        except Exception:
+        except Exception as exc:
             logger.exception("failed to parse hybrid search results")
-            return []
+            raise RagSearchError("hybrid search result parsing failed") from exc
 
         return chunks
 

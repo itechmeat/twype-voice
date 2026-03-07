@@ -153,7 +153,7 @@ async def test_tts_node_text_mode_publishes_structured_response_when_present() -
         )
     ]
 
-    async def fake_publish(result) -> None:
+    async def fake_publish(result, message_id=None) -> None:
         published_results.append(result)
 
     async def _dual_layer():
@@ -239,7 +239,7 @@ async def test_tts_node_voice_mode_routes_only_voice_part_to_base_tts(
         )
     ]
 
-    async def fake_publish(result) -> None:
+    async def fake_publish(result, message_id=None) -> None:
         published_results.append(result)
 
     async def _dual_layer():
@@ -289,7 +289,7 @@ async def test_tts_node_voice_mode_skips_tts_when_voice_part_is_empty(
         )
     ]
 
-    async def fake_publish(result) -> None:
+    async def fake_publish(result, message_id=None) -> None:
         published_results.append(result)
 
     async def _text_only_response():

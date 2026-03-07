@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -7,6 +8,8 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+logger = logging.getLogger("twype-agent")
 
 DEFAULT_PROMPT_LOCALE = "en"
 
@@ -63,6 +66,11 @@ class PromptBundle:
     layers: dict[str, str]
     versions: dict[str, int]
     resolved_locales: dict[str, str]
+
+
+class _PartialFormatDict(dict[str, str]):
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
 
 
 def normalize_locale(locale: str | None, *, default_locale: str = DEFAULT_PROMPT_LOCALE) -> str:
@@ -207,9 +215,7 @@ async def load_prompt_layers(
 
 def build_instructions(layers: dict[str, str]) -> str:
     ordered_layers = [
-        value.strip()
-        for key in PROMPT_LAYER_ORDER
-        if (value := layers.get(key)) and value.strip()
+        value.strip() for key in PROMPT_LAYER_ORDER if (value := layers.get(key)) and value.strip()
     ]
     return "\n\n".join(ordered_layers)
 
@@ -219,6 +225,34 @@ def require_prompt_layer(layers: dict[str, str], key: str) -> str:
     if value is None or not value.strip():
         raise RuntimeError(f"prompt layer '{key}' is required")
     return value.strip()
+
+
+def _neutral_emotional_defaults() -> dict[str, str]:
+    from emotional_analyzer import get_tone_guidance
+
+    return {
+        "quadrant": "neutral",
+        "valence": "0.0",
+        "arousal": "0.0",
+        "trend_valence": "stable",
+        "trend_arousal": "stable",
+        "tone_guidance": get_tone_guidance("neutral"),
+    }
+
+
+NEUTRAL_EMOTIONAL_DEFAULTS: dict[str, str] = _neutral_emotional_defaults()
+
+
+def render_emotional_context(instructions: str, emotional_vars: dict[str, str] | None) -> str:
+    resolved = {
+        **NEUTRAL_EMOTIONAL_DEFAULTS,
+        **(emotional_vars or {}),
+    }
+    try:
+        return instructions.format_map(_PartialFormatDict(resolved))
+    except (ValueError, IndexError):
+        logger.warning("failed to render emotional context into instructions")
+        return instructions
 
 
 async def save_config_snapshot(

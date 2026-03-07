@@ -49,6 +49,8 @@ async def save_transcript(
     sentiment_raw: float | None,
     *,
     mode: Literal["voice", "text"] = "voice",
+    valence: float | None = None,
+    arousal: float | None = None,
 ) -> uuid.UUID | None:
     cleaned_text = text.strip()
     if not cleaned_text:
@@ -67,6 +69,8 @@ async def save_transcript(
             content=cleaned_text,
             voice_transcript=cleaned_text if mode == "voice" else None,
             sentiment_raw=sentiment_raw if mode == "voice" else None,
+            valence=valence,
+            arousal=arousal,
         )
         session.add(message)
         await session.commit()

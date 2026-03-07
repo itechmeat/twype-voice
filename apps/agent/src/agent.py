@@ -11,10 +11,16 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from dual_layer_parser import DualLayerResult, DualLayerStreamParser, parse_dual_layer_stream
+from emotional_analyzer import (
+    EmotionalState,
+    EmotionalTrendTracker,
+    get_tone_guidance,
+)
 from languages import normalize_language_code
 from livekit.agents import Agent, AgentSession, llm
 from livekit.agents import tts as livekit_tts
 from livekit.plugins import deepgram, silero
+from prompts import NEUTRAL_EMOTIONAL_DEFAULTS, render_emotional_context
 from rag import RagChunk, RagEngine, format_rag_context
 from settings import AgentSettings
 from stt import build_stt
@@ -167,15 +173,17 @@ class TwypeAgent(Agent):
         self._thinking_sounds_enabled = thinking_sounds_enabled
         self._thinking_sounds_delay = thinking_sounds_delay
         self._chat_response_publisher: Callable[[str], Awaitable[None]] | None = None
-        self._structured_response_publisher: Callable[[DualLayerResult], Awaitable[None]] | None = (
-            None
-        )
+        self._structured_response_publisher: (
+            Callable[[DualLayerResult, str | None], Awaitable[None]] | None
+        ) = None
         self._default_language = normalize_language_code(default_language) or "en"
         self.rag_engine = rag_engine
         self._last_rag_chunks: list[RagChunk] = []
         self._last_dual_layer_result: DualLayerResult | None = None
         self._current_response_id: uuid.UUID | None = None
-        self._completed_responses: deque[CompletedResponse] = deque()
+        self._completed_responses: deque[CompletedResponse] = deque(maxlen=100)
+        self.emotional_trend_tracker = EmotionalTrendTracker()
+        self.current_emotional_state: EmotionalState | None = None
 
     @property
     def text_mode_active(self) -> bool:
@@ -241,6 +249,20 @@ class TwypeAgent(Agent):
         annotated.content = [prefix.rstrip(), *updated_content]
         return annotated
 
+    def _emotional_vars(self) -> dict[str, str]:
+        state = self.current_emotional_state
+        if state is None:
+            return NEUTRAL_EMOTIONAL_DEFAULTS
+
+        return {
+            "quadrant": state.quadrant,
+            "valence": str(round(state.valence, 2)),
+            "arousal": str(round(state.arousal, 2)),
+            "trend_valence": state.trend_valence,
+            "trend_arousal": state.trend_arousal,
+            "tone_guidance": get_tone_guidance(state.quadrant),
+        }
+
     def _build_mode_aware_chat_ctx(self, chat_ctx: llm.ChatContext | None) -> llm.ChatContext:
         source = chat_ctx.copy() if chat_ctx is not None else llm.ChatContext.empty()
         user_message_indexes = [
@@ -253,6 +275,7 @@ class TwypeAgent(Agent):
         items: list[llm.ChatItem] = []
         merged_into_existing_system = False
         guidance = self._mode_guidance_text()
+        emotional_vars = self._emotional_vars()
 
         for index, item in enumerate(source.items):
             if not isinstance(item, llm.ChatMessage):
@@ -265,7 +288,8 @@ class TwypeAgent(Agent):
                 updated_content = list(copied_item.content)
                 for content_index, content_item in enumerate(updated_content):
                     if isinstance(content_item, str):
-                        updated_content[content_index] = f"{guidance}\n\n{content_item}"
+                        rendered = render_emotional_context(content_item, emotional_vars)
+                        updated_content[content_index] = f"{guidance}\n\n{rendered}"
                         break
                 else:
                     updated_content = [guidance, *updated_content]
@@ -337,14 +361,10 @@ class TwypeAgent(Agent):
         if not query_text:
             return mode_aware_chat_ctx
 
-        try:
-            chunks = await self.rag_engine.search(
-                query_text,
-                language=self._resolve_rag_language(message),
-            )
-        except Exception:
-            logger.exception("rag search failed")
-            return mode_aware_chat_ctx
+        chunks = await self.rag_engine.search(
+            query_text,
+            language=self._resolve_rag_language(message),
+        )
 
         self._last_rag_chunks = chunks
         rag_context = format_rag_context(chunks)
@@ -419,49 +439,64 @@ class TwypeAgent(Agent):
         voice_stream: AsyncIterator[str] = parser.iter_voice_tokens()
 
         if not self.text_mode_active:
-            first_voice_chunk = await anext(voice_stream, None)
-            if first_voice_chunk is None:
-                result = None
-            else:
+            try:
+                first_voice_chunk = await anext(voice_stream, None)
+                if first_voice_chunk is None:
+                    await self._close_async_iterable(voice_stream)
+                    await self._finalize_dual_layer_result(parser)
+                    return None
+
                 result = super().tts_node(
                     self._prepend_chunk(first_voice_chunk, voice_stream),
                     model_settings,
                 )
 
-            if asyncio.iscoroutine(result):
-                result = await result
+                if asyncio.iscoroutine(result):
+                    result = await result
 
-            if result is None:
+                if result is None:
+                    await self._close_async_iterable(voice_stream)
+                    await self._finalize_dual_layer_result(parser)
+                    return None
+
+                if hasattr(result, "__aiter__"):
+                    return self._wrap_tts_output(result, parser, voice_stream)
+
                 await self._close_async_iterable(voice_stream)
                 await self._finalize_dual_layer_result(parser)
+                return result
+            except BaseException:
+                await self._close_async_iterable(voice_stream)
+                await self._finalize_dual_layer_result(parser)
+                raise
+
+        finalized = False
+        try:
+            async for _chunk in voice_stream:
+                pass
+
+            dual_layer_result = await parser.result()
+            completed_response = self._record_completed_response(dual_layer_result)
+            finalized = True
+
+            if dual_layer_result.text_items and self._structured_response_publisher is not None:
+                message_id = (
+                    str(completed_response.response_id)
+                    if completed_response.response_id is not None
+                    else None
+                )
+                await self._structured_response_publisher(dual_layer_result, message_id)
                 return None
 
-            if hasattr(result, "__aiter__"):
-                return self._wrap_tts_output(result, parser, voice_stream)
+            if self._chat_response_publisher is not None and dual_layer_result.voice_text:
+                await self._chat_response_publisher(dual_layer_result.voice_text)
 
-            await self._close_async_iterable(voice_stream)
-            await self._finalize_dual_layer_result(parser)
-            return result
-
-        async for _chunk in voice_stream:
-            pass
-
-        dual_layer_result = await parser.result()
-        completed_response = self._record_completed_response(dual_layer_result)
-
-        if dual_layer_result.text_items and self._structured_response_publisher is not None:
-            message_id = (
-                str(completed_response.response_id)
-                if completed_response.response_id is not None
-                else None
-            )
-            await self._structured_response_publisher(dual_layer_result, message_id)
             return None
-
-        if self._chat_response_publisher is not None and dual_layer_result.voice_text:
-            await self._chat_response_publisher(dual_layer_result.voice_text)
-
-        return None
+        except BaseException:
+            await self._close_async_iterable(voice_stream)
+            if not finalized:
+                await self._finalize_dual_layer_result(parser)
+            raise
 
     async def _wrap_tts_output(
         self,

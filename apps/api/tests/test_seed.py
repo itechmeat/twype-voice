@@ -68,6 +68,43 @@ async def test_seed_agent_config_is_idempotent(
 
 
 @pytest.mark.asyncio
+async def test_seed_main_skips_test_user_by_default(
+    seed_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://example")
+    monkeypatch.delenv("TWYPE_SEED_INCLUDE_TEST_USER", raising=False)
+
+    async def fake_seed_user() -> None:
+        calls.append("seed_user")
+
+    async def fake_seed_agent_config() -> None:
+        calls.append("seed_agent_config")
+
+    async def fake_seed_tts_config() -> None:
+        calls.append("seed_tts_config")
+
+    async def fake_seed_knowledge_data(*, embedding_client=None) -> None:
+        _ = embedding_client
+        calls.append("seed_knowledge_data")
+
+    monkeypatch.setattr(seed_module, "seed_user", fake_seed_user)
+    monkeypatch.setattr(seed_module, "seed_agent_config", fake_seed_agent_config)
+    monkeypatch.setattr(seed_module, "seed_tts_config", fake_seed_tts_config)
+    monkeypatch.setattr(seed_module, "seed_knowledge_data", fake_seed_knowledge_data)
+
+    await seed_module.main()
+
+    assert calls == [
+        "seed_agent_config",
+        "seed_tts_config",
+        "seed_knowledge_data",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_seed_knowledge_data_creates_source_and_chunks(
     seed_module,
     db_engine,
@@ -87,8 +124,12 @@ async def test_seed_knowledge_data_creates_source_and_chunks(
 
     monkeypatch.setattr(seed_module, "session_scope", fake_session_scope)
 
-    await seed_module.seed_knowledge_data()
-    await seed_module.seed_knowledge_data()
+    class FakeEmbeddingClient:
+        async def embed_inputs(self, inputs):
+            return [[0.001] * 1536 for _ in inputs]
+
+    await seed_module.seed_knowledge_data(embedding_client=FakeEmbeddingClient())
+    await seed_module.seed_knowledge_data(embedding_client=FakeEmbeddingClient())
 
     async with factory() as session:
         source = await session.scalar(

@@ -81,9 +81,7 @@ def _extract_structured_html(html: str) -> _HtmlResult:
     segments: list[ExtractedSegment] = []
 
     title_element = soup.find(["h1", "h2", "title"])
-    title = (
-        _normalize_text(title_element.get_text(" ", strip=True)) if title_element else None
-    )
+    title = _normalize_text(title_element.get_text(" ", strip=True)) if title_element else None
 
     for element in container.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li"]):
         text = _normalize_text(element.get_text(" ", strip=True))
