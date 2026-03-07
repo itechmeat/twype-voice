@@ -68,13 +68,19 @@ def test_chunk_document_preserves_sentence_boundaries() -> None:
 def test_chunk_document_keeps_overlap_and_section_metadata() -> None:
     sentence_a = "Breathing slowly helps reduce acute stress."
     sentence_b = "Naming visible objects helps restore orientation."
+    breathing_sentences = [f"{sentence_a} Step {index}." for index in range(25)]
+    orientation_sentences = [f"{sentence_b} Phase {index}." for index in range(25)]
     document = ExtractedDocument(
         source=make_manifest_source(),
         path=Path("fixture.txt"),
         segments=[
-            ExtractedSegment(text=" ".join([sentence_a] * 25), section="Breathing", page_number=3),
             ExtractedSegment(
-                text=" ".join([sentence_b] * 25),
+                text=" ".join(breathing_sentences),
+                section="Breathing",
+                page_number=3,
+            ),
+            ExtractedSegment(
+                text=" ".join(orientation_sentences),
                 section="Orientation",
                 page_number=4,
             ),
@@ -90,6 +96,6 @@ def test_chunk_document_keeps_overlap_and_section_metadata() -> None:
     assert chunks[0].section == "Breathing"
     assert chunks[-1].section == "Orientation"
     assert any(
-        current.content.split(". ")[-1].rstrip(".!?") in following.content
+        current.content[-80:].strip() and current.content[-80:].strip() in following.content
         for current, following in pairwise(chunks)
     )

@@ -46,6 +46,14 @@ class TestEstimateCircumplex:
         _v2, arousal_with_ellipsis = estimate_circumplex(None, "I see... well... hmm...")
         assert arousal_with_ellipsis < arousal_no_ellipsis
 
+    def test_longer_words_increase_arousal_signal(self) -> None:
+        _v1, arousal_short = estimate_circumplex(None, "calm words only")
+        _v2, arousal_long = estimate_circumplex(
+            None,
+            "hyperventilation disorientation dysregulation",
+        )
+        assert arousal_long > arousal_short
+
 
 class TestClassifyQuadrant:
     def test_distress(self) -> None:

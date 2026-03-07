@@ -272,6 +272,20 @@ def test_render_emotional_context_replaces_placeholders() -> None:
     assert result == "Quadrant: distress, Valence: -0.6, Arousal: 0.8"
 
 
+def test_render_emotional_context_preserves_unknown_placeholders() -> None:
+    from prompts import render_emotional_context
+
+    template = "Tone: {tone_guidance}; proactive={proactive_type}"
+    result = render_emotional_context(
+        template,
+        {
+            "tone_guidance": "Calm and steady",
+        },
+    )
+
+    assert result == "Tone: Calm and steady; proactive={proactive_type}"
+
+
 def test_render_emotional_context_all_placeholders() -> None:
     from prompts import render_emotional_context
 

@@ -12,7 +12,7 @@ from uuid import UUID
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 API_ROOT = ROOT_DIR / "apps" / "api"
-for candidate in (API_ROOT, ROOT_DIR):
+for candidate in (ROOT_DIR, API_ROOT):
     candidate_str = str(candidate)
     if candidate_str not in sys.path:
         sys.path.insert(0, candidate_str)

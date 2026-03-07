@@ -30,6 +30,7 @@ _TONE_GUIDANCE: dict[QuadrantName, str] = {
 _EXCLAMATION_RE = re.compile(r"[!?]+")
 _CAPS_WORD_RE = re.compile(r"\b[A-Z\u0410-\u042F\u0401]{2,}\b")
 _ELLIPSIS_RE = re.compile(r"\.{2,}|…")
+_WORD_EDGE_PUNCTUATION = ".,!?…:;\"'`()[]{}"
 
 _REFINEMENT_SYSTEM_PROMPT = (
     "You are an emotion analysis engine. Given a user utterance, conversation context, "
@@ -85,8 +86,12 @@ def _estimate_arousal_from_text(text: str) -> float:
     exclamation_score = min(exclamation_count / word_count, 1.0) * 0.6
     caps_score = min(caps_count / word_count, 1.0) * 0.3
     ellipsis_penalty = min(ellipsis_count / word_count, 1.0) * 0.2
+    average_word_length = (
+        sum(len(word.strip(_WORD_EDGE_PUNCTUATION)) for word in words) / word_count
+    )
+    word_length_score = max(-1.0, min(1.0, (average_word_length - 4.5) / 6.0)) * 0.1
 
-    arousal = exclamation_score + caps_score - ellipsis_penalty
+    arousal = exclamation_score + caps_score + word_length_score - ellipsis_penalty
     return max(-1.0, min(1.0, arousal))
 
 

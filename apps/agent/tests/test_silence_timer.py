@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 from silence_timer import SilenceTimer
@@ -204,3 +205,35 @@ async def test_reset_on_stopped_timer_does_nothing(tracker):
     await asyncio.sleep(0.1)
     assert tracker.short_count == 0
     assert not timer.is_running
+
+
+@pytest.mark.asyncio()
+async def test_long_timeout_stays_anchored_to_initial_start_time() -> None:
+    events: list[tuple[str, float]] = []
+
+    async def on_short() -> None:
+        events.append(("short", time.monotonic()))
+        await asyncio.sleep(0.06)
+
+    async def on_long() -> None:
+        events.append(("long", time.monotonic()))
+
+    timer = SilenceTimer(
+        short_timeout=0.02,
+        long_timeout=0.05,
+        on_short_timeout=on_short,
+        on_long_timeout=on_long,
+    )
+
+    started_at = time.monotonic()
+    timer.start()
+
+    for _ in range(20):
+        if len(events) == 2:
+            break
+        await asyncio.sleep(0.01)
+
+    timer.stop()
+
+    assert [name for name, _timestamp in events] == ["short", "long"]
+    assert events[-1][1] - started_at < 0.1

@@ -68,6 +68,11 @@ class PromptBundle:
     resolved_locales: dict[str, str]
 
 
+class _PartialFormatDict(dict[str, str]):
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
 def normalize_locale(locale: str | None, *, default_locale: str = DEFAULT_PROMPT_LOCALE) -> str:
     raw_locale = (locale or "").strip().replace("_", "-")
     if not raw_locale or raw_locale.lower() == "multi":
@@ -239,17 +244,15 @@ NEUTRAL_EMOTIONAL_DEFAULTS: dict[str, str] = _neutral_emotional_defaults()
 
 
 def render_emotional_context(instructions: str, emotional_vars: dict[str, str] | None) -> str:
-    resolved = emotional_vars if emotional_vars is not None else NEUTRAL_EMOTIONAL_DEFAULTS
+    resolved = {
+        **NEUTRAL_EMOTIONAL_DEFAULTS,
+        **(emotional_vars or {}),
+    }
     try:
-        return instructions.format_map(resolved)
-    except (KeyError, ValueError, IndexError):
-        logger.warning(
-            "failed to render emotional context into instructions, using neutral defaults",
-        )
-        try:
-            return instructions.format_map(NEUTRAL_EMOTIONAL_DEFAULTS)
-        except (KeyError, ValueError, IndexError):
-            return instructions
+        return instructions.format_map(_PartialFormatDict(resolved))
+    except (ValueError, IndexError):
+        logger.warning("failed to render emotional context into instructions")
+        return instructions
 
 
 async def save_config_snapshot(

@@ -71,6 +71,8 @@ class SilenceTimer:
 
     async def _run(self) -> None:
         try:
+            loop = asyncio.get_running_loop()
+            started_at = loop.time()
             await asyncio.sleep(self._short_timeout)
 
             if not self._fired:
@@ -80,8 +82,9 @@ class SilenceTimer:
                 except Exception:
                     logger.exception("silence timer short callback failed")
 
-            remaining = self._long_timeout - self._short_timeout
-            await asyncio.sleep(remaining)
+            remaining = self._long_timeout - (loop.time() - started_at)
+            if remaining > 0:
+                await asyncio.sleep(remaining)
 
             try:
                 await self._on_long_timeout()
