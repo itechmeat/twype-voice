@@ -4,7 +4,12 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from datachannel import publish_chat_response, publish_transcript, receive_chat_message
+from datachannel import (
+    publish_chat_response,
+    publish_structured_response,
+    publish_transcript,
+    receive_chat_message,
+)
 
 
 class _DummyParticipant:
@@ -105,6 +110,12 @@ def test_receive_chat_message_ignores_unknown_type() -> None:
     assert receive_chat_message(packet, local_participant_identity="agent-1") is None
 
 
+def test_receive_chat_message_ignores_structured_response() -> None:
+    packet = _packet({"type": "structured_response", "items": []})
+
+    assert receive_chat_message(packet, local_participant_identity="agent-1") is None
+
+
 def test_receive_chat_message_ignores_self_originated_packets() -> None:
     packet = _packet({"type": "chat_message", "text": "Hello"}, participant_identity="agent-1")
 
@@ -154,4 +165,73 @@ async def test_publish_chat_response_final_includes_message_id() -> None:
         "text": "hello",
         "is_final": True,
         "message_id": "00000000-0000-0000-0000-000000000000",
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_structured_response_final_is_reliable() -> None:
+    room = _DummyRoom()
+
+    await publish_structured_response(
+        room,
+        items=[
+            {"text": "Point A", "chunk_ids": ["uuid-1"]},
+            {"text": "Point B", "chunk_ids": []},
+        ],
+        is_final=True,
+        message_id="msg-1",
+    )
+
+    data, reliable = room.local_participant.calls[0]
+    assert reliable is True
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {
+        "type": "structured_response",
+        "items": [
+            {"text": "Point A", "chunk_ids": ["uuid-1"]},
+            {"text": "Point B", "chunk_ids": []},
+        ],
+        "is_final": True,
+        "message_id": "msg-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_structured_response_interim_is_lossy_and_omits_message_id() -> None:
+    room = _DummyRoom()
+
+    await publish_structured_response(
+        room,
+        items=[{"text": "Point A", "chunk_ids": []}],
+        is_final=False,
+        message_id="msg-1",
+    )
+
+    data, reliable = room.local_participant.calls[0]
+    assert reliable is False
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {
+        "type": "structured_response",
+        "items": [{"text": "Point A", "chunk_ids": []}],
+        "is_final": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_structured_response_final_omits_message_id_when_missing() -> None:
+    room = _DummyRoom()
+
+    await publish_structured_response(
+        room,
+        items=[{"text": "Point A", "chunk_ids": []}],
+        is_final=True,
+    )
+
+    data, reliable = room.local_participant.calls[0]
+    assert reliable is True
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {
+        "type": "structured_response",
+        "items": [{"text": "Point A", "chunk_ids": []}],
+        "is_final": True,
     }

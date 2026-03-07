@@ -30,4 +30,5 @@ class MessageItem(BaseModel):
     role: str
     mode: str
     content: str
+    source_ids: list[str] | None = None
     created_at: datetime

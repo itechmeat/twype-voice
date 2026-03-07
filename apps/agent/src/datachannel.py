@@ -42,7 +42,7 @@ def receive_chat_message(
 
     payload_type = payload.get("type")
     if payload_type != "chat_message":
-        if payload_type not in {"transcript", "chat_response"}:
+        if payload_type not in {"transcript", "chat_response", "structured_response"}:
             logger.debug("ignored unsupported data channel message type=%r", payload_type)
         return None
 
@@ -98,6 +98,28 @@ async def publish_chat_response(
     payload: dict[str, Any] = {
         "type": "chat_response",
         "text": text,
+        "is_final": is_final,
+    }
+
+    if is_final and message_id is not None:
+        payload["message_id"] = message_id
+
+    await room.local_participant.publish_data(
+        _encode_json(payload),
+        reliable=is_final,
+    )
+
+
+async def publish_structured_response(
+    room: Any,
+    *,
+    items: list[dict[str, Any]],
+    is_final: bool,
+    message_id: str | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "type": "structured_response",
+        "items": items,
         "is_final": is_final,
     }
 

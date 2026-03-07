@@ -53,7 +53,11 @@ async def test_ensure_database_exists_ignores_duplicate_create(
 
     monkeypatch.setattr(postgres_support, "_admin_database_urls", lambda _url: [admin_url])
     monkeypatch.setattr(postgres_support.asyncpg, "connect", fake_connect)
-    monkeypatch.setattr(postgres_support.asyncpg, "DuplicateDatabaseError", FakeDuplicateDatabaseError)
+    monkeypatch.setattr(
+        postgres_support.asyncpg,
+        "DuplicateDatabaseError",
+        FakeDuplicateDatabaseError,
+    )
     postgres_support._ensured_databases.clear()
 
     await postgres_support.ensure_database_exists(database_url)

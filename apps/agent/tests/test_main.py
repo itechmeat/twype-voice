@@ -7,9 +7,16 @@ from uuid import uuid4
 
 import main as main_module
 import pytest
+from dual_layer_parser import DualLayerResult, TextItem
 from livekit.agents import llm
 from prompts import PromptBundle
 from settings import AgentSettings
+
+AGENT_KWARGS = {
+    "instructions": "System\n\nVoice",
+    "mode_voice_guidance": "Voice guidance",
+    "mode_text_guidance": "Text guidance",
+}
 
 
 class FakeRoom:
@@ -91,22 +98,36 @@ class FakeSpeechHandle:
         return _wait().__await__()
 
 
-@pytest.mark.asyncio
-@pytest.mark.usefixtures("livekit_required_env")
-async def test_entrypoint_starts_agent_with_db_instructions(
+def _make_prompt_bundle() -> PromptBundle:
+    return PromptBundle(
+        requested_locale="ru",
+        locale_chain=("ru", "en"),
+        layers={
+            "system_prompt": "System",
+            "voice_prompt": "Voice",
+            "mode_voice_guidance": "Voice guidance",
+            "mode_text_guidance": "Text guidance",
+        },
+        versions={
+            "system_prompt": 1,
+            "voice_prompt": 1,
+            "mode_voice_guidance": 1,
+            "mode_text_guidance": 1,
+        },
+        resolved_locales={
+            "system_prompt": "en",
+            "voice_prompt": "en",
+            "mode_voice_guidance": "en",
+            "mode_text_guidance": "en",
+        },
+    )
+
+
+def _patch_prompt_loading(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    save_snapshot: bool = True,
 ) -> None:
-    ctx = FakeContext()
-    session = FakeSession()
-    captured_agent_kwargs: dict[str, object] = {}
-    saved_snapshot: dict[str, object] = {}
-
-    monkeypatch.setattr(main_module, "_settings", AgentSettings())
-    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
-
-    async def fake_resolve_session_id(room_name: str):
-        return uuid4()
-
     async def fake_resolve_prompt_locale(
         sessionmaker,
         session_id,
@@ -119,32 +140,36 @@ async def test_entrypoint_starts_agent_with_db_instructions(
 
     async def fake_load_prompt_bundle(sessionmaker, locale, *, default_locale):
         _ = (sessionmaker, locale, default_locale)
-        return PromptBundle(
-            requested_locale="ru",
-            locale_chain=("ru", "en"),
-            layers={
-                "system_prompt": "System",
-                "voice_prompt": "Voice",
-                "mode_voice_guidance": "Voice guidance",
-                "mode_text_guidance": "Text guidance",
-            },
-            versions={
-                "system_prompt": 1,
-                "voice_prompt": 1,
-                "mode_voice_guidance": 1,
-                "mode_text_guidance": 1,
-            },
-            resolved_locales={
-                "system_prompt": "en",
-                "voice_prompt": "en",
-                "mode_voice_guidance": "en",
-                "mode_text_guidance": "en",
-            },
-        )
+        return _make_prompt_bundle()
 
-    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
     monkeypatch.setattr(main_module, "resolve_prompt_locale", fake_resolve_prompt_locale)
     monkeypatch.setattr(main_module, "load_prompt_bundle", fake_load_prompt_bundle)
+
+    if save_snapshot:
+        async def fake_save_config_snapshot(sessionmaker, session_id, prompt_bundle) -> None:
+            _ = (sessionmaker, session_id, prompt_bundle)
+
+        monkeypatch.setattr(main_module, "save_config_snapshot", fake_save_config_snapshot)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_entrypoint_starts_agent_with_db_instructions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    captured_agent_kwargs: dict[str, object] = {}
+    saved_snapshot: dict[str, object] = {}
+
+    monkeypatch.setattr(main_module, "_settings", AgentSettings())
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch, save_snapshot=False)
+
+    async def fake_resolve_session_id(room_name: str):
+        return uuid4()
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
     monkeypatch.setattr(main_module, "build_instructions", lambda layers: "System\n\nVoice")
 
     async def fake_save_config_snapshot(sessionmaker, session_id, prompt_bundle) -> None:
@@ -156,6 +181,9 @@ async def test_entrypoint_starts_agent_with_db_instructions(
             self.current_mode = "voice"
             self.current_language = None
 
+        def switch_to(self, mode: str) -> None:
+            self.current_mode = mode
+
         def set_language(self, language: str | None) -> None:
             self.current_language = language
 
@@ -163,9 +191,17 @@ async def test_entrypoint_starts_agent_with_db_instructions(
         def __init__(self, **kwargs: object) -> None:
             captured_agent_kwargs.update(kwargs)
             self.mode_context = FakeModeContext()
+            self._last_dual_layer_result = None
+            self._current_response_id = uuid4()
 
         def set_chat_response_publisher(self, publisher) -> None:
-            self.publisher = publisher
+            self._chat_response_publisher = publisher
+
+        def set_structured_response_publisher(self, publisher) -> None:
+            self._structured_response_publisher = publisher
+
+        def clear_current_response_id(self) -> None:
+            self._current_response_id = None
 
     monkeypatch.setattr(main_module, "save_config_snapshot", fake_save_config_snapshot)
     monkeypatch.setattr(main_module, "TwypeAgent", FakeTwypeAgent)
@@ -190,7 +226,6 @@ async def test_entrypoint_handles_text_chat_message_via_data_channel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ctx = FakeContext()
-    ctx.proc.userdata["db_sessionmaker"] = None
     session = FakeSession()
     published_chat_responses: list[dict[str, object]] = []
     saved_user_messages: list[dict[str, object]] = []
@@ -199,13 +234,10 @@ async def test_entrypoint_handles_text_chat_message_via_data_channel(
     persisted_response_id = uuid4()
 
     async def emit_assistant_message() -> None:
-        handler = session.handlers["conversation_item_added"]
+        handler = session.handlers["agent_speech_committed"]
         handler(
             SimpleNamespace(
-                item=SimpleNamespace(
-                    role="assistant",
-                    content="Hello back",
-                )
+                text="Hello back",
             )
         )
         await asyncio.sleep(0)
@@ -214,6 +246,7 @@ async def test_entrypoint_handles_text_chat_message_via_data_channel(
 
     monkeypatch.setattr(main_module, "_settings", AgentSettings())
     monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
 
     async def fake_resolve_session_id(room_name: str):
         _ = room_name
@@ -232,12 +265,21 @@ async def test_entrypoint_handles_text_chat_message_via_data_channel(
         )
         return uuid4()
 
-    async def fake_save_agent_response(session_id, text, *, mode="voice"):
+    async def fake_save_agent_response(
+        session_id,
+        text,
+        *,
+        mode="voice",
+        source_ids=None,
+        message_id=None,
+    ):
         saved_assistant_messages.append(
             {
                 "session_id": session_id,
                 "text": text,
                 "mode": mode,
+                "source_ids": source_ids,
+                "message_id": message_id,
             }
         )
         return persisted_response_id
@@ -282,6 +324,8 @@ async def test_entrypoint_handles_text_chat_message_via_data_channel(
     assert saved_assistant_messages and saved_assistant_messages[0]["mode"] == "text"
     assert saved_assistant_messages[0]["text"] == "Hello back"
     assert saved_assistant_messages[0]["session_id"] == resolved_session_id
+    assert saved_assistant_messages[0]["source_ids"] is None
+    assert saved_assistant_messages[0]["message_id"] is None
     assert published_chat_responses == [
         {
             "room": ctx.room,
@@ -300,7 +344,6 @@ async def test_entrypoint_keeps_voice_persistence_and_transcript_publishing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ctx = FakeContext()
-    ctx.proc.userdata["db_sessionmaker"] = None
     session = FakeSession()
     saved_user_messages: list[dict[str, object]] = []
     saved_assistant_messages: list[dict[str, object]] = []
@@ -309,6 +352,7 @@ async def test_entrypoint_keeps_voice_persistence_and_transcript_publishing(
 
     monkeypatch.setattr(main_module, "_settings", AgentSettings())
     monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
 
     async def fake_resolve_session_id(room_name: str):
         _ = room_name
@@ -327,12 +371,21 @@ async def test_entrypoint_keeps_voice_persistence_and_transcript_publishing(
         )
         return uuid4()
 
-    async def fake_save_agent_response(session_id, text, *, mode="voice"):
+    async def fake_save_agent_response(
+        session_id,
+        text,
+        *,
+        mode="voice",
+        source_ids=None,
+        message_id=None,
+    ):
         saved_assistant_messages.append(
             {
                 "session_id": session_id,
                 "text": text,
                 "mode": mode,
+                "source_ids": source_ids,
+                "message_id": message_id,
             }
         )
         return uuid4()
@@ -375,12 +428,9 @@ async def test_entrypoint_keeps_voice_persistence_and_transcript_publishing(
     await asyncio.sleep(0)
 
     session.current_speech = FakeSpeechHandle(modality="audio")
-    session.handlers["conversation_item_added"](
+    session.handlers["agent_speech_committed"](
         SimpleNamespace(
-            item=SimpleNamespace(
-                role="assistant",
-                content="Voice reply",
-            )
+            text="Voice reply",
         )
     )
     await asyncio.sleep(0)
@@ -389,6 +439,8 @@ async def test_entrypoint_keeps_voice_persistence_and_transcript_publishing(
     assert saved_user_messages[0]["session_id"] == resolved_session_id
     assert saved_assistant_messages and saved_assistant_messages[0]["mode"] == "voice"
     assert saved_assistant_messages[0]["session_id"] == resolved_session_id
+    assert saved_assistant_messages[0]["source_ids"] is None
+    assert saved_assistant_messages[0]["message_id"] is None
     assert published_transcripts[0]["role"] == "user"
     assert published_transcripts[0]["text"] == "Hello"
     assert published_transcripts[-1]["role"] == "assistant"
@@ -398,17 +450,160 @@ async def test_entrypoint_keeps_voice_persistence_and_transcript_publishing(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("livekit_required_env")
+async def test_entrypoint_persists_source_ids_and_skips_text_final_when_structured_result_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    saved_assistant_messages: list[dict[str, object]] = []
+    published_chat_responses: list[dict[str, object]] = []
+    resolved_session_id = uuid4()
+    source_chunk_id = uuid4()
+
+    monkeypatch.setattr(main_module, "_settings", AgentSettings())
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        _ = room_name
+        return resolved_session_id
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+
+    async def fake_save_agent_response(
+        session_id,
+        text,
+        *,
+        mode="voice",
+        source_ids=None,
+        message_id=None,
+    ):
+        saved_assistant_messages.append(
+            {
+                "session_id": session_id,
+                "text": text,
+                "mode": mode,
+                "source_ids": source_ids,
+                "message_id": message_id,
+            }
+        )
+        return uuid4()
+
+    async def fake_publish_chat_response(room, *, text, is_final, message_id=None) -> None:
+        published_chat_responses.append(
+            {
+                "room": room,
+                "text": text,
+                "is_final": is_final,
+                "message_id": message_id,
+            }
+        )
+
+    monkeypatch.setattr(main_module, "save_agent_response", fake_save_agent_response)
+    monkeypatch.setattr(main_module, "publish_chat_response", fake_publish_chat_response)
+
+    await main_module.entrypoint(ctx)
+
+    started_agent = session.started_with["agent"]
+    started_agent.mode_context.switch_to("text")
+    response_id = uuid4()
+    started_agent._current_response_id = response_id
+    started_agent._last_dual_layer_result = DualLayerResult(
+        voice_text="Short answer",
+        text_items=[TextItem(text="Detail", chunk_ids=[source_chunk_id])],
+        all_chunk_ids=[source_chunk_id],
+    )
+
+    session.handlers["agent_speech_committed"](
+        SimpleNamespace(text="---VOICE---\nShort answer\n---TEXT---\n- Detail [1]")
+    )
+    await asyncio.sleep(0)
+
+    assert saved_assistant_messages == [
+        {
+            "session_id": resolved_session_id,
+            "text": "---VOICE---\nShort answer\n---TEXT---\n- Detail [1]",
+            "mode": "text",
+            "source_ids": [str(source_chunk_id)],
+            "message_id": response_id,
+        }
+    ]
+    assert published_chat_responses == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_entrypoint_structured_response_uses_pre_generated_response_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    published_structured_responses: list[dict[str, object]] = []
+    response_id = uuid4()
+    resolved_session_id = uuid4()
+
+    monkeypatch.setattr(main_module, "_settings", AgentSettings())
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        _ = room_name
+        return resolved_session_id
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+
+    async def fake_publish_structured_response(room, *, items, is_final, message_id=None) -> None:
+        published_structured_responses.append(
+            {
+                "room": room,
+                "items": items,
+                "is_final": is_final,
+                "message_id": message_id,
+            }
+        )
+
+    monkeypatch.setattr(
+        main_module,
+        "publish_structured_response",
+        fake_publish_structured_response,
+    )
+
+    await main_module.entrypoint(ctx)
+
+    started_agent = session.started_with["agent"]
+    started_agent._current_response_id = response_id
+
+    await started_agent._structured_response_publisher(
+        DualLayerResult(
+            voice_text="Short answer",
+            text_items=[TextItem(text="Detail", chunk_ids=[])],
+            all_chunk_ids=[],
+        )
+    )
+
+    assert published_structured_responses == [
+        {
+            "room": ctx.room,
+            "items": [{"text": "Detail", "chunk_ids": []}],
+            "is_final": True,
+            "message_id": str(response_id),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
 async def test_entrypoint_switches_mode_from_text_to_voice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ctx = FakeContext()
-    ctx.proc.userdata["db_sessionmaker"] = None
     session = FakeSession()
     saved_user_messages: list[dict[str, object]] = []
     resolved_session_id = uuid4()
 
     monkeypatch.setattr(main_module, "_settings", AgentSettings())
     monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
 
     async def fake_resolve_session_id(room_name: str):
         _ = room_name

@@ -6,6 +6,12 @@ import agent as agent_module
 import pytest
 from livekit.agents import llm
 
+AGENT_KWARGS = {
+    "instructions": "System",
+    "mode_voice_guidance": "VOICE_GUIDANCE",
+    "mode_text_guidance": "TEXT_GUIDANCE",
+}
+
 
 @pytest.mark.asyncio
 async def test_llm_node_yields_filler_when_first_token_delayed(
@@ -22,6 +28,9 @@ async def test_llm_node_yields_filler_when_first_token_delayed(
     monkeypatch.setattr(agent_module.Agent, "llm_node", fake_llm_node)
 
     agent = agent_module.TwypeAgent(
+        instructions="System",
+        mode_voice_guidance="VOICE_GUIDANCE",
+        mode_text_guidance="TEXT_GUIDANCE",
         thinking_sounds_enabled=True,
         thinking_sounds_delay=0.01,
     )
@@ -58,6 +67,7 @@ async def test_llm_node_injects_voice_guidance_and_labels_history(
     original_chat_ctx.add_message(role="assistant", content="Assistant reply")
 
     agent = agent_module.TwypeAgent(
+        instructions="System",
         mode_voice_guidance="VOICE_GUIDANCE",
         mode_text_guidance="TEXT_GUIDANCE",
         thinking_sounds_enabled=False,
@@ -97,6 +107,7 @@ async def test_llm_node_injects_text_guidance_without_fillers(
     monkeypatch.setattr(agent_module.Agent, "llm_node", fake_llm_node)
 
     agent = agent_module.TwypeAgent(
+        instructions="System",
         mode_voice_guidance="VOICE_GUIDANCE",
         mode_text_guidance="TEXT_GUIDANCE",
         thinking_sounds_enabled=True,
@@ -113,7 +124,7 @@ async def test_llm_node_injects_text_guidance_without_fillers(
 
 def test_message_mode_defaults_to_voice_without_mode_key() -> None:
     message = llm.ChatMessage(role="user", content=["test"])
-    agent = agent_module.TwypeAgent()
+    agent = agent_module.TwypeAgent(**AGENT_KWARGS)
 
     assert agent._message_mode(message) == "voice"
 
@@ -124,7 +135,7 @@ def test_annotate_user_message_prefixes_non_string_content() -> None:
         content=[],
         extra={"mode": "text"},
     )
-    agent = agent_module.TwypeAgent()
+    agent = agent_module.TwypeAgent(**AGENT_KWARGS)
 
     annotated = agent._annotate_user_message(message)
 
@@ -149,6 +160,7 @@ async def test_llm_node_labels_only_recent_user_messages(
         original_chat_ctx.add_message(role="user", content=f"Question {index}")
 
     agent = agent_module.TwypeAgent(
+        instructions="System",
         mode_voice_guidance="VOICE_GUIDANCE",
         mode_text_guidance="TEXT_GUIDANCE",
         thinking_sounds_enabled=False,
@@ -178,6 +190,9 @@ async def test_llm_node_does_not_yield_filler_when_fast(
     monkeypatch.setattr(agent_module.Agent, "llm_node", fake_llm_node)
 
     agent = agent_module.TwypeAgent(
+        instructions="System",
+        mode_voice_guidance="VOICE_GUIDANCE",
+        mode_text_guidance="TEXT_GUIDANCE",
         thinking_sounds_enabled=True,
         thinking_sounds_delay=0.05,
     )
@@ -203,6 +218,9 @@ async def test_llm_node_passthrough_when_disabled(
     monkeypatch.setattr(agent_module.Agent, "llm_node", fake_llm_node)
 
     agent = agent_module.TwypeAgent(
+        instructions="System",
+        mode_voice_guidance="VOICE_GUIDANCE",
+        mode_text_guidance="TEXT_GUIDANCE",
         thinking_sounds_enabled=False,
         thinking_sounds_delay=0.001,
     )

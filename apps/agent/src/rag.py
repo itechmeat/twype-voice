@@ -218,8 +218,8 @@ def format_rag_context(chunks: list[RagChunk]) -> str:
         "The following excerpts are from verified sources. Use them to support your response.",
         "",
     ]
-    for chunk in chunks:
-        source_line = f"Source: {chunk.title}"
+    for index, chunk in enumerate(chunks, start=1):
+        source_line = f"[{index}] Source: {chunk.title}"
         if chunk.author:
             source_line += f" by {chunk.author}"
         source_line += f" ({chunk.source_type})"

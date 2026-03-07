@@ -25,23 +25,6 @@ MODE_GUIDANCE_KEYS = [
     "mode_text_guidance",
 ]
 
-FALLBACK_SYSTEM_PROMPT = """You are Twype, a helpful expert assistant.
-
-Rules:
-- Reply in the user's language.
-- Keep responses brief, conversational, and to the point.
-- If you are not confident, say so clearly and ask a clarifying question.
-"""
-
-FALLBACK_VOICE_GUIDANCE = (
-    "Current input mode: voice. Reply briefly, naturally, and conversationally. "
-    "Prioritize spoken clarity over structure."
-)
-FALLBACK_TEXT_GUIDANCE = (
-    "Current input mode: text. Reply in more detail, use clear structure when helpful, "
-    "and optimize for readability."
-)
-
 _PROMPT_BUNDLE_QUERY = sa.text(
     """
     SELECT key, locale, value, version
@@ -229,6 +212,13 @@ def build_instructions(layers: dict[str, str]) -> str:
         if (value := layers.get(key)) and value.strip()
     ]
     return "\n\n".join(ordered_layers)
+
+
+def require_prompt_layer(layers: dict[str, str], key: str) -> str:
+    value = layers.get(key)
+    if value is None or not value.strip():
+        raise RuntimeError(f"prompt layer '{key}' is required")
+    return value.strip()
 
 
 async def save_config_snapshot(

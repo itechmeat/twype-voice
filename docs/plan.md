@@ -49,10 +49,10 @@
 - [x] **S14. RAG: hybrid search at query time**
       RAG Engine in the agent: converting the utterance to an embedding, hybrid search (cosine distance pgvector + tsvector full-text + metadata filters). Top-K (3-5) relevant fragments are included in the LLM context along with source metadata. Prioritizing fragments in the user's language without excluding cross-language results.
 
-- [ ] **S15. Dual-layer response (voice + text)**
+- [x] **S15. Dual-layer response (voice + text)**
       The LLM generates a response in two parts following the dual-layer response prompt. Voice part: 2-5 sentences, conversational style, verbal references to sources. Text part: structured bullet points with chunk_ids arrays for each point. The agent sends both parts: voice part to TTS, text part via data channel. Responses not confirmed by the knowledge base are labeled as reasoning.
 
-- [ ] **S16. Source attribution (API + client)**
+- [x] **S16. Source attribution (API + client)**
       FastAPI endpoint `GET /sources/{chunk_ids}` — returns full metadata of RAG fragments (source_type, title, author, section, page_range, url). The client renders indicator icons (book, video, podcast, article) next to each bullet point. Popup on click: author, title, section, page/timecode, direct link.
 
 - [ ] **S17. Emotional adaptation (Circumplex)**

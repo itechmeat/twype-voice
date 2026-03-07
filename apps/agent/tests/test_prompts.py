@@ -6,17 +6,19 @@ from uuid import uuid4
 import pytest
 
 
-def test_fallback_system_prompt_non_empty() -> None:
-    from prompts import FALLBACK_SYSTEM_PROMPT
+def test_require_prompt_layer_returns_trimmed_value() -> None:
+    from prompts import require_prompt_layer
 
-    assert FALLBACK_SYSTEM_PROMPT.strip()
+    assert (
+        require_prompt_layer({"mode_voice_guidance": " Voice "}, "mode_voice_guidance") == "Voice"
+    )
 
 
-def test_mode_guidance_fallbacks_non_empty() -> None:
-    from prompts import FALLBACK_TEXT_GUIDANCE, FALLBACK_VOICE_GUIDANCE
+def test_require_prompt_layer_raises_for_missing_value() -> None:
+    from prompts import require_prompt_layer
 
-    assert FALLBACK_VOICE_GUIDANCE.strip()
-    assert FALLBACK_TEXT_GUIDANCE.strip()
+    with pytest.raises(RuntimeError, match="mode_voice_guidance"):
+        require_prompt_layer({}, "mode_voice_guidance")
 
 
 def test_build_locale_fallback_chain_prefers_specific_then_default() -> None:
@@ -264,5 +266,9 @@ def test_twype_agent_uses_dynamic_instructions(monkeypatch: pytest.MonkeyPatch) 
 
     from agent import TwypeAgent
 
-    TwypeAgent(instructions="db instructions")
+    TwypeAgent(
+        instructions="db instructions",
+        mode_voice_guidance="voice guidance",
+        mode_text_guidance="text guidance",
+    )
     assert captured["instructions"] == "db instructions"

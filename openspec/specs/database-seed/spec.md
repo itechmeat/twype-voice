@@ -19,7 +19,7 @@ The seed script SHALL create a test user with email `test@twype.local`, a known 
 - **THEN** a verified user with email `test@twype.local` SHALL exist in the `users` table
 
 ### Requirement: Seed agent config
-The seed script SHALL create AgentConfig records for all prompt layers: `system_prompt`, `voice_prompt`, `dual_layer_prompt`, `emotion_prompt`, `crisis_prompt`, `rag_prompt`, `language_prompt`, `proactive_prompt`. Each record SHALL contain a meaningful prompt text in Russian that reflects the layer's purpose. The `system_prompt` SHALL define the agent's identity, expertise domain, and core behavioral rules. The `voice_prompt` SHALL instruct the agent to respond concisely in 2-5 sentences for voice mode. The `language_prompt` SHALL instruct the agent to match the user's language. The `dual_layer_prompt` SHALL describe the two-part response format (voice + text). The `emotion_prompt` SHALL instruct the agent to adapt tone based on emotional signals. The `crisis_prompt` SHALL define the crisis detection and response protocol. The `rag_prompt` SHALL instruct the agent on using knowledge base sources with attribution. The `proactive_prompt` SHALL instruct the agent on follow-up behavior during silence.
+The seed script SHALL create AgentConfig records for all prompt layers: `system_prompt`, `voice_prompt`, `dual_layer_prompt`, `emotion_prompt`, `crisis_prompt`, `rag_prompt`, `language_prompt`, `proactive_prompt`. Each record SHALL contain a meaningful prompt text in Russian that reflects the layer's purpose. The `system_prompt` SHALL define the agent's identity, expertise domain, and core behavioral rules. The `voice_prompt` SHALL instruct the agent to respond concisely in 2-5 sentences for voice mode. The `language_prompt` SHALL instruct the agent to match the user's language. The `dual_layer_prompt` SHALL instruct the LLM to structure responses using `---VOICE---` and `---TEXT---` delimiters, with the voice part containing 2-5 conversational sentences and the text part containing bullet points with `[N]` source references. It SHALL include a concrete example demonstrating the expected format with both referenced and unreferenced bullet points. The `emotion_prompt` SHALL instruct the agent to adapt tone based on emotional signals. The `crisis_prompt` SHALL define the crisis detection and response protocol. The `rag_prompt` SHALL instruct the agent on using knowledge base sources with attribution. The `proactive_prompt` SHALL instruct the agent on follow-up behavior during silence.
 
 #### Scenario: Agent prompts seeded with meaningful content
 - **WHEN** seed script runs
@@ -32,6 +32,10 @@ The seed script SHALL create AgentConfig records for all prompt layers: `system_
 #### Scenario: Crisis prompt content
 - **WHEN** the `crisis_prompt` AgentConfig record is read
 - **THEN** it SHALL contain instructions to detect distress signals, respond with empathy, and recommend professional help
+
+#### Scenario: Dual layer prompt contains format example
+- **WHEN** the `dual_layer_prompt` AgentConfig record is read
+- **THEN** it SHALL contain the `---VOICE---` and `---TEXT---` delimiters, `[N]` reference notation, and an example showing both sourced and reasoning bullet points
 
 ### Requirement: Seed TTS config
 The seed script SHALL create a TTSConfig record for the default Inworld voice with Russian language.

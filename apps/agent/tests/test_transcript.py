@@ -184,6 +184,50 @@ async def test_save_agent_response_persists_text_mode_without_voice_transcript(
 
 
 @pytest.mark.asyncio
+async def test_save_agent_response_persists_source_ids_as_jsonb_array(
+    sessionmaker,
+    seeded_session: Session,
+) -> None:
+    configure_transcript_store(sessionmaker)
+    source_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+
+    inserted_id = await save_agent_response(
+        seeded_session.id,
+        " Hi ",
+        source_ids=source_ids,
+    )
+
+    assert inserted_id is not None
+
+    async with sessionmaker() as session:
+        msg = await session.get(Message, inserted_id)
+        assert msg is not None
+        assert msg.source_ids == source_ids
+
+
+@pytest.mark.asyncio
+async def test_save_agent_response_uses_pre_generated_message_id(
+    sessionmaker,
+    seeded_session: Session,
+) -> None:
+    configure_transcript_store(sessionmaker)
+    message_id = uuid.uuid4()
+
+    inserted_id = await save_agent_response(
+        seeded_session.id,
+        " Hi ",
+        message_id=message_id,
+    )
+
+    assert inserted_id == message_id
+
+    async with sessionmaker() as session:
+        msg = await session.get(Message, message_id)
+        assert msg is not None
+        assert msg.id == message_id
+
+
+@pytest.mark.asyncio
 async def test_save_agent_response_returns_none_on_db_error(
     sessionmaker,
     seeded_session: Session,
@@ -199,5 +243,5 @@ async def test_save_agent_response_returns_none_on_db_error(
 
     monkeypatch.setattr(transcript_module, "_sessionmaker", BrokenSessionmaker())
 
-    inserted_id = await transcript_module.save_agent_response(seeded_session.id, "Hi")
-    assert inserted_id is None
+    with pytest.raises(RuntimeError, match="boom"):
+        await transcript_module.save_agent_response(seeded_session.id, "Hi")

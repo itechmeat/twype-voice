@@ -23,6 +23,12 @@ from testsupport import (
     ensure_pgvector_extension,
 )
 
+AGENT_KWARGS = {
+    "instructions": "System",
+    "mode_voice_guidance": "Voice guidance",
+    "mode_text_guidance": "Text guidance",
+}
+
 
 def _test_database_url() -> str:
     return default_test_database_url(os.environ)
@@ -313,7 +319,7 @@ def test_format_rag_context_renders_full_metadata() -> None:
     )
 
     assert "[Knowledge Base Context]" in formatted
-    assert "Source: Burnout Prevention by Dr. Smith (book)" in formatted
+    assert "[1] Source: Burnout Prevention by Dr. Smith (book)" in formatted
     assert "Section: Chapter 3 | Pages: 45-47" in formatted
     assert "Symptoms include exhaustion." in formatted
 
@@ -334,7 +340,7 @@ def test_format_rag_context_handles_partial_metadata() -> None:
         ]
     )
 
-    assert "Source: Recovery Basics (article)" in formatted
+    assert "[1] Source: Recovery Basics (article)" in formatted
     assert "Section:" not in formatted
     assert "Pages:" not in formatted
 
@@ -376,6 +382,9 @@ async def test_llm_node_appends_rag_context_when_results_exist(
     chat_ctx.add_message(role="user", content="How do I recover from burnout?")
 
     agent = agent_module.TwypeAgent(
+        instructions=AGENT_KWARGS["instructions"],
+        mode_voice_guidance=AGENT_KWARGS["mode_voice_guidance"],
+        mode_text_guidance=AGENT_KWARGS["mode_text_guidance"],
         default_language="en",
         rag_engine=FakeRagEngine(),
         thinking_sounds_enabled=False,
@@ -386,9 +395,11 @@ async def test_llm_node_appends_rag_context_when_results_exist(
     assert result == "OK"
     assert captured["query_text"] == "How do I recover from burnout?"
     assert captured["language"] == "en"
+    assert len(agent._last_rag_chunks) == 1
     rag_message = captured["chat_ctx"].items[-1]
     assert isinstance(rag_message, llm.ChatMessage)
     assert rag_message.role == "system"
+    assert "[1] Source: Burnout Prevention" in rag_message.text_content
     assert "Burnout Prevention" in rag_message.text_content
 
 
@@ -413,6 +424,9 @@ async def test_llm_node_skips_rag_injection_when_search_empty(
     chat_ctx.add_message(role="user", content="How do I recover from burnout?")
 
     agent = agent_module.TwypeAgent(
+        instructions=AGENT_KWARGS["instructions"],
+        mode_voice_guidance=AGENT_KWARGS["mode_voice_guidance"],
+        mode_text_guidance=AGENT_KWARGS["mode_text_guidance"],
         rag_engine=FakeRagEngine(),
         thinking_sounds_enabled=False,
     )
@@ -420,6 +434,7 @@ async def test_llm_node_skips_rag_injection_when_search_empty(
     await agent.llm_node(chat_ctx, [], None)
 
     assert len(captured["chat_ctx"].items) == 2
+    assert agent._last_rag_chunks == []
 
 
 @pytest.mark.asyncio
@@ -443,6 +458,9 @@ async def test_llm_node_degrades_gracefully_when_rag_errors(
     chat_ctx.add_message(role="user", content="How do I recover from burnout?")
 
     agent = agent_module.TwypeAgent(
+        instructions=AGENT_KWARGS["instructions"],
+        mode_voice_guidance=AGENT_KWARGS["mode_voice_guidance"],
+        mode_text_guidance=AGENT_KWARGS["mode_text_guidance"],
         rag_engine=FakeRagEngine(),
         thinking_sounds_enabled=False,
     )
@@ -450,3 +468,4 @@ async def test_llm_node_degrades_gracefully_when_rag_errors(
     await agent.llm_node(chat_ctx, [], None)
 
     assert len(captured["chat_ctx"].items) == 2
+    assert agent._last_rag_chunks == []

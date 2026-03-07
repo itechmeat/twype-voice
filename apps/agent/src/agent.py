@@ -3,21 +3,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterable, Awaitable, Callable
+import uuid
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from dual_layer_parser import DualLayerResult, DualLayerStreamParser, parse_dual_layer_stream
 from languages import normalize_language_code
 from livekit.agents import Agent, AgentSession, llm
 from livekit.agents import tts as livekit_tts
 from livekit.plugins import deepgram, silero
-from prompts import (
-    FALLBACK_SYSTEM_PROMPT,
-    FALLBACK_TEXT_GUIDANCE,
-    FALLBACK_VOICE_GUIDANCE,
-)
-from rag import RagEngine, format_rag_context
+from rag import RagChunk, RagEngine, format_rag_context
 from settings import AgentSettings
 from stt import build_stt
 from tts import build_tts
@@ -137,27 +134,51 @@ class TwypeAgent(Agent):
     def __init__(
         self,
         *,
-        instructions: str = FALLBACK_SYSTEM_PROMPT,
-        mode_voice_guidance: str = FALLBACK_VOICE_GUIDANCE,
-        mode_text_guidance: str = FALLBACK_TEXT_GUIDANCE,
+        instructions: str,
+        mode_voice_guidance: str,
+        mode_text_guidance: str,
         thinking_sounds_enabled: bool = True,
         thinking_sounds_delay: float = 1.5,
         default_language: str = "en",
         rag_engine: RagEngine | None = None,
     ) -> None:
-        super().__init__(instructions=instructions)
+        resolved_instructions = instructions.strip()
+        resolved_voice_guidance = mode_voice_guidance.strip()
+        resolved_text_guidance = mode_text_guidance.strip()
+        if not resolved_instructions:
+            raise ValueError("instructions must not be empty")
+        if not resolved_voice_guidance:
+            raise ValueError("mode_voice_guidance must not be empty")
+        if not resolved_text_guidance:
+            raise ValueError("mode_text_guidance must not be empty")
+
+        super().__init__(instructions=resolved_instructions)
         self.mode_context = ModeContext()
-        self._mode_voice_guidance = mode_voice_guidance
-        self._mode_text_guidance = mode_text_guidance
+        self._mode_voice_guidance = resolved_voice_guidance
+        self._mode_text_guidance = resolved_text_guidance
         self._thinking_sounds_enabled = thinking_sounds_enabled
         self._thinking_sounds_delay = thinking_sounds_delay
         self._chat_response_publisher: Callable[[str], Awaitable[None]] | None = None
+        self._structured_response_publisher: Callable[[DualLayerResult], Awaitable[None]] | None = (
+            None
+        )
         self._default_language = normalize_language_code(default_language) or "en"
         self.rag_engine = rag_engine
+        self._last_rag_chunks: list[RagChunk] = []
+        self._last_dual_layer_result: DualLayerResult | None = None
+        self._current_response_id: uuid.UUID | None = None
 
     @property
     def text_mode_active(self) -> bool:
         return self.mode_context.current_mode == "text"
+
+    @property
+    def last_dual_layer_result(self) -> DualLayerResult | None:
+        return self._last_dual_layer_result
+
+    @property
+    def current_response_id(self) -> uuid.UUID | None:
+        return self._current_response_id
 
     def set_chat_response_publisher(
         self,
@@ -165,14 +186,20 @@ class TwypeAgent(Agent):
     ) -> None:
         self._chat_response_publisher = publisher
 
+    def set_structured_response_publisher(
+        self,
+        publisher: Callable[[DualLayerResult], Awaitable[None]] | None,
+    ) -> None:
+        self._structured_response_publisher = publisher
+
     async def on_enter(self) -> None:
         participant = getattr(getattr(self.session, "room_io", None), "linked_participant", None)
         logger.info("agent entered session, participant=%s", format_participant(participant))
 
     def _mode_guidance_text(self) -> str:
         if self.mode_context.current_mode == "text":
-            return self._mode_text_guidance.strip() or FALLBACK_TEXT_GUIDANCE
-        return self._mode_voice_guidance.strip() or FALLBACK_VOICE_GUIDANCE
+            return self._mode_text_guidance
+        return self._mode_voice_guidance
 
     def _message_mode(self, message: llm.ChatMessage) -> ModeName:
         if message.role != "user":
@@ -268,9 +295,7 @@ class TwypeAgent(Agent):
         if message is not None and isinstance(message.extra, dict):
             for key in ("language", "locale"):
                 value = message.extra.get(key)
-                normalized = (
-                    normalize_language_code(str(value)) if isinstance(value, str) else None
-                )
+                normalized = normalize_language_code(str(value)) if isinstance(value, str) else None
                 if normalized:
                     return normalized
 
@@ -307,6 +332,7 @@ class TwypeAgent(Agent):
             logger.exception("rag search failed")
             return mode_aware_chat_ctx
 
+        self._last_rag_chunks = chunks
         rag_context = format_rag_context(chunks)
         if not rag_context:
             return mode_aware_chat_ctx
@@ -319,6 +345,9 @@ class TwypeAgent(Agent):
         return mode_aware_chat_ctx
 
     async def llm_node(self, chat_ctx, tools, model_settings):
+        self._last_rag_chunks = []
+        self._last_dual_layer_result = None
+        self._current_response_id = uuid.uuid4()
         mode_aware_chat_ctx = self._build_mode_aware_chat_ctx(chat_ctx)
         mode_aware_chat_ctx = await self._inject_rag_context(chat_ctx, mode_aware_chat_ctx)
 
@@ -372,14 +401,81 @@ class TwypeAgent(Agent):
         return _gen()
 
     async def tts_node(self, text: AsyncIterable[str], model_settings):
+        parser = parse_dual_layer_stream(text, rag_chunks=self._last_rag_chunks)
+        voice_stream: AsyncIterator[str] = parser.iter_voice_tokens()
+
         if not self.text_mode_active:
-            result = super().tts_node(text, model_settings)
+            first_voice_chunk = await anext(voice_stream, None)
+            if first_voice_chunk is None:
+                result = None
+            else:
+                result = super().tts_node(
+                    self._prepend_chunk(first_voice_chunk, voice_stream),
+                    model_settings,
+                )
+
             if asyncio.iscoroutine(result):
-                return await result
+                result = await result
+
+            if result is None:
+                await self._close_async_iterable(voice_stream)
+                await self._finalize_dual_layer_result(parser)
+                return None
+
+            if hasattr(result, "__aiter__"):
+                return self._wrap_tts_output(result, parser, voice_stream)
+
+            await self._close_async_iterable(voice_stream)
+            await self._finalize_dual_layer_result(parser)
             return result
 
-        async for chunk in text:
-            if self._chat_response_publisher is not None and chunk:
-                await self._chat_response_publisher(chunk)
+        async for _chunk in voice_stream:
+            pass
+
+        dual_layer_result = await parser.result()
+        self._last_dual_layer_result = dual_layer_result
+
+        if dual_layer_result.text_items and self._structured_response_publisher is not None:
+            await self._structured_response_publisher(dual_layer_result)
+            return None
+
+        if self._chat_response_publisher is not None and dual_layer_result.voice_text:
+            await self._chat_response_publisher(dual_layer_result.voice_text)
 
         return None
+
+    async def _wrap_tts_output(
+        self,
+        audio_stream: AsyncIterable[Any],
+        parser: DualLayerStreamParser,
+        voice_stream: AsyncIterator[str],
+    ) -> AsyncIterable[Any]:
+        try:
+            async for frame in audio_stream:
+                yield frame
+        finally:
+            await self._close_async_iterable(voice_stream)
+            await self._finalize_dual_layer_result(parser)
+
+    async def _finalize_dual_layer_result(self, parser: DualLayerStreamParser) -> None:
+        dual_layer_result = await parser.result()
+        self._last_dual_layer_result = dual_layer_result
+        if dual_layer_result.text_items and self._structured_response_publisher is not None:
+            await self._structured_response_publisher(dual_layer_result)
+
+    async def _close_async_iterable(self, stream: AsyncIterator[str]) -> None:
+        aclose = getattr(stream, "aclose", None)
+        if callable(aclose):
+            await aclose()
+
+    def clear_current_response_id(self) -> None:
+        self._current_response_id = None
+
+    async def _prepend_chunk(
+        self,
+        first_chunk: str,
+        stream: AsyncIterable[str],
+    ) -> AsyncIterable[str]:
+        yield first_chunk
+        async for chunk in stream:
+            yield chunk
