@@ -254,6 +254,64 @@ async def test_resolve_prompt_locale_prefers_user_preferences() -> None:
     assert locale == "ru-RU"
 
 
+def test_render_emotional_context_replaces_placeholders() -> None:
+    from prompts import render_emotional_context
+
+    template = "Quadrant: {quadrant}, Valence: {valence}, Arousal: {arousal}"
+    result = render_emotional_context(
+        template,
+        {
+            "quadrant": "distress",
+            "valence": "-0.6",
+            "arousal": "0.8",
+            "trend_valence": "falling",
+            "trend_arousal": "rising",
+            "tone_guidance": "Be calm",
+        },
+    )
+    assert result == "Quadrant: distress, Valence: -0.6, Arousal: 0.8"
+
+
+def test_render_emotional_context_all_placeholders() -> None:
+    from prompts import render_emotional_context
+
+    template = "{quadrant} {valence} {arousal} {trend_valence} {trend_arousal} {tone_guidance}"
+    vars_ = {
+        "quadrant": "excitement",
+        "valence": "0.7",
+        "arousal": "0.5",
+        "trend_valence": "rising",
+        "trend_arousal": "stable",
+        "tone_guidance": "Enthusiastic",
+    }
+    result = render_emotional_context(template, vars_)
+    assert result == "excitement 0.7 0.5 rising stable Enthusiastic"
+
+
+def test_render_emotional_context_no_placeholders() -> None:
+    from prompts import render_emotional_context
+
+    original = "No emotional placeholders here"
+    result = render_emotional_context(original, {"quadrant": "neutral"})
+    assert result == original
+
+
+def test_render_emotional_context_malformed_template() -> None:
+    from prompts import render_emotional_context
+
+    malformed = "Bad template {unknown_key} here"
+    result = render_emotional_context(malformed, {"quadrant": "neutral"})
+    assert result == malformed
+
+
+def test_render_emotional_context_none_uses_defaults() -> None:
+    from prompts import NEUTRAL_EMOTIONAL_DEFAULTS, render_emotional_context
+
+    template = "Q: {quadrant}"
+    result = render_emotional_context(template, None)
+    assert result == f"Q: {NEUTRAL_EMOTIONAL_DEFAULTS['quadrant']}"
+
+
 def test_twype_agent_uses_dynamic_instructions(monkeypatch: pytest.MonkeyPatch) -> None:
     import livekit.agents as lk_agents
 

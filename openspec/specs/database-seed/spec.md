@@ -19,11 +19,19 @@ The seed script SHALL create a test user with email `test@twype.local`, a known 
 - **THEN** a verified user with email `test@twype.local` SHALL exist in the `users` table
 
 ### Requirement: Seed agent config
-The seed script SHALL create AgentConfig records for all prompt layers: `system_prompt`, `voice_prompt`, `dual_layer_prompt`, `emotion_prompt`, `crisis_prompt`, `rag_prompt`, `language_prompt`, `proactive_prompt`. Each record SHALL contain a meaningful prompt text in Russian that reflects the layer's purpose. The `system_prompt` SHALL define the agent's identity, expertise domain, and core behavioral rules. The `voice_prompt` SHALL instruct the agent to respond concisely in 2-5 sentences for voice mode. The `language_prompt` SHALL instruct the agent to match the user's language. The `dual_layer_prompt` SHALL instruct the LLM to structure responses using `---VOICE---` and `---TEXT---` delimiters, with the voice part containing 2-5 conversational sentences and the text part containing bullet points with `[N]` source references. It SHALL include a concrete example demonstrating the expected format with both referenced and unreferenced bullet points. The `emotion_prompt` SHALL instruct the agent to adapt tone based on emotional signals. The `crisis_prompt` SHALL define the crisis detection and response protocol. The `rag_prompt` SHALL instruct the agent on using knowledge base sources with attribution. The `proactive_prompt` SHALL instruct the agent on follow-up behavior during silence.
+The seed script SHALL create AgentConfig records for all prompt layers: `system_prompt`, `voice_prompt`, `dual_layer_prompt`, `emotion_prompt`, `crisis_prompt`, `rag_prompt`, `language_prompt`, `proactive_prompt`. Each record SHALL contain a meaningful prompt text in English that reflects the layer's purpose. The `system_prompt` SHALL define the agent's identity, expertise domain, and core behavioral rules. The `voice_prompt` SHALL instruct the agent to respond concisely in 2-5 sentences for voice mode. The `language_prompt` SHALL instruct the agent to match the user's language. The `dual_layer_prompt` SHALL instruct the LLM to structure responses using `---VOICE---` and `---TEXT---` delimiters, with the voice part containing 2-5 conversational sentences and the text part containing bullet points with `[N]` source references. It SHALL include a concrete example demonstrating the expected format with both referenced and unreferenced bullet points. The `emotion_prompt` SHALL instruct the agent to adapt tone based on emotional signals. The `crisis_prompt` SHALL define the crisis detection and response protocol. The `rag_prompt` SHALL instruct the agent on using knowledge base sources with attribution. The `proactive_prompt` SHALL be a template string containing `{proactive_type}` and `{emotional_context}` placeholders. The template SHALL instruct the LLM to generate a brief, natural follow-up when `proactive_type` is `follow_up`, and a gentle, emotionally-aware check-in when `proactive_type` is `extended_silence`. The template SHALL reference the provided emotional context to adapt the tone.
 
 #### Scenario: Agent prompts seeded with meaningful content
 - **WHEN** seed script runs
-- **THEN** 8 AgentConfig records SHALL exist with `is_active = true`, one for each prompt layer, each containing a substantive Russian-language prompt (not a placeholder)
+- **THEN** 8 AgentConfig records SHALL exist with `is_active = true`, one for each prompt layer, each containing a substantive English-language prompt (not a placeholder)
+
+#### Scenario: Proactive prompt contains template placeholders
+- **WHEN** the `proactive_prompt` AgentConfig record is read
+- **THEN** it SHALL contain `{proactive_type}` and `{emotional_context}` placeholder strings
+
+#### Scenario: Proactive prompt template renders correctly
+- **WHEN** the seeded `proactive_prompt` value is used with `str.format_map({"proactive_type": "follow_up", "emotional_context": "neutral"})`
+- **THEN** rendering succeeds without errors and produces a coherent instruction string
 
 #### Scenario: System prompt content
 - **WHEN** the `system_prompt` AgentConfig record is read
@@ -58,3 +66,21 @@ The seed script SHALL create a sample `knowledge_sources` record and associated 
 #### Scenario: Seed is idempotent for knowledge data
 - **WHEN** `python scripts/seed.py` is run twice
 - **THEN** the sample knowledge source and chunks SHALL not be duplicated
+
+
+## MODIFIED Requirements
+
+### Requirement: Seed emotion_prompt as a template
+The seed script SHALL insert an `emotion_prompt` entry into `agent_config` with a template string containing Circumplex emotional context placeholders. The template SHALL include `{quadrant}`, `{valence}`, `{arousal}`, `{trend_valence}`, `{trend_arousal}`, and `{tone_guidance}` placeholders. The template text SHALL instruct the LLM to adapt its response tone based on the user's current emotional state, describe the Circumplex quadrant system, and provide the current state values for reference. The seed SHALL be provided for at least `en` and `ru` locales.
+
+#### Scenario: English emotion_prompt seed
+- **WHEN** the seed script runs and inserts the `emotion_prompt` for locale `en`
+- **THEN** the `agent_config` table contains an `emotion_prompt` row with English template text containing all six placeholders
+
+#### Scenario: Russian emotion_prompt seed
+- **WHEN** the seed script runs and inserts the `emotion_prompt` for locale `ru`
+- **THEN** the `agent_config` table contains an `emotion_prompt` row with Russian template text containing all six placeholders
+
+#### Scenario: Template placeholders are valid Python format strings
+- **WHEN** the seeded `emotion_prompt` value is used with `str.format_map()` and a dict containing all six keys
+- **THEN** rendering succeeds without errors

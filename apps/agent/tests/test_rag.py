@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 import agent as agent_module
 import pytest
 from livekit.agents import llm
-from rag import RagChunk, RagEngine, format_rag_context
+from rag import RagChunk, RagEmbeddingError, RagEngine, RagSearchError, format_rag_context
 from settings import AgentSettings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -196,7 +196,7 @@ async def test_embed_query_returns_embedding(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("livekit_required_env")
-async def test_embed_query_returns_none_on_error(
+async def test_embed_query_raises_on_error(
     rag_sessionmaker: async_sessionmaker[AsyncSession],
 ) -> None:
     engine = RagEngine(
@@ -205,7 +205,8 @@ async def test_embed_query_returns_none_on_error(
         embedding_client=FakeEmbeddingClient(error=RuntimeError("boom")),
     )
 
-    assert await engine.embed_query("burnout symptoms") is None
+    with pytest.raises(RagEmbeddingError):
+        await engine.embed_query("burnout symptoms")
 
 
 @pytest.mark.asyncio
@@ -300,6 +301,52 @@ async def test_hybrid_search_returns_empty_when_no_rows(
     )
 
     assert await engine.search("burnout symptoms", language="en") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_hybrid_search_raises_when_embedding_fails(
+    rag_sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    engine = RagEngine(
+        AgentSettings(),
+        rag_sessionmaker,
+        embedding_client=FakeEmbeddingClient(error=RuntimeError("boom")),
+    )
+
+    with pytest.raises(RagEmbeddingError):
+        await engine.search("burnout symptoms", language="en")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_hybrid_search_raises_when_query_execution_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    rag_sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    engine = RagEngine(
+        AgentSettings(),
+        rag_sessionmaker,
+        embedding_client=FakeEmbeddingClient(embeddings=[_embedding(1.0)]),
+    )
+
+    async def broken_sessionmaker():
+        raise AssertionError("not used")
+
+    class BrokenSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def execute(self, *_args, **_kwargs):
+            raise RuntimeError("db down")
+
+    monkeypatch.setattr(engine, "_sessionmaker", lambda: BrokenSession())
+
+    with pytest.raises(RagSearchError):
+        await engine.search("burnout symptoms", language="en")
 
 
 def test_format_rag_context_renders_full_metadata() -> None:
@@ -438,19 +485,17 @@ async def test_llm_node_skips_rag_injection_when_search_empty(
 
 
 @pytest.mark.asyncio
-async def test_llm_node_degrades_gracefully_when_rag_errors(
+async def test_llm_node_raises_when_rag_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, object] = {}
-
     async def fake_llm_node(self, chat_ctx, tools, model_settings):
-        captured["chat_ctx"] = chat_ctx
+        _ = (self, chat_ctx, tools, model_settings)
         return "OK"
 
     class FakeRagEngine:
         async def search(self, query_text: str, language: str | None):
             _ = (query_text, language)
-            raise RuntimeError("boom")
+            raise RagSearchError("boom")
 
     monkeypatch.setattr(agent_module.Agent, "llm_node", fake_llm_node)
 
@@ -465,7 +510,7 @@ async def test_llm_node_degrades_gracefully_when_rag_errors(
         thinking_sounds_enabled=False,
     )
 
-    await agent.llm_node(chat_ctx, [], None)
+    with pytest.raises(RagSearchError):
+        await agent.llm_node(chat_ctx, [], None)
 
-    assert len(captured["chat_ctx"].items) == 2
     assert agent._last_rag_chunks == []

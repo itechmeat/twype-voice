@@ -90,7 +90,6 @@ def test_chunk_document_keeps_overlap_and_section_metadata() -> None:
     assert chunks[0].section == "Breathing"
     assert chunks[-1].section == "Orientation"
     assert any(
-        current.content.split(". ")[-1].rstrip(".!?")
-        in following.content
+        current.content.split(". ")[-1].rstrip(".!?") in following.content
         for current, following in pairwise(chunks)
     )

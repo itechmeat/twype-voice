@@ -7,17 +7,21 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Protocol
 from uuid import UUID
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+API_ROOT = ROOT_DIR / "apps" / "api"
+for candidate in (API_ROOT, ROOT_DIR):
+    candidate_str = str(candidate)
+    if candidate_str not in sys.path:
+        sys.path.insert(0, candidate_str)
 
 import sqlalchemy as sa
 from passlib.context import CryptContext
 from sqlalchemy.dialects.postgresql import insert
 from src.database import session_scope
-from src.knowledge_constants import EMBEDDING_DIMENSION
+from src.knowledge_ingestion import EmbeddingClient, EmbeddingInput, EmbeddingSettings
 from src.knowledge_ingestion.loader import DatabaseLoader, PreparedSource
 from src.knowledge_ingestion.types import EmbeddedChunk, ManifestSource
 from src.models import AgentConfig, TTSConfig, User
@@ -60,10 +64,18 @@ PROMPT_LAYER_TRANSLATIONS: dict[str, dict[str, str]] = {
             "- After the stress wave drops, choose one concrete next step"
         ),
         "emotion_prompt": (
-            "Take the user's emotional signals into account: "
-            "speak more calmly and gently during anxiety, "
-            "add reassurance and clarity during confusion, "
-            "and stay professional with a neutral tone."
+            "Adapt your response tone to the user's current emotional state.\n\n"
+            "Circumplex emotional model — current reading:\n"
+            "- Quadrant: {quadrant}\n"
+            "- Valence (pleasant/unpleasant): {valence}\n"
+            "- Arousal (high-energy/low-energy): {arousal}\n"
+            "- Valence trend: {trend_valence}\n"
+            "- Arousal trend: {trend_arousal}\n\n"
+            "Tone guidance: {tone_guidance}\n\n"
+            "Apply this guidance naturally without mentioning the model, "
+            "scores, or quadrants to the user. "
+            "If the emotional state is neutral or stable, "
+            "respond in your default balanced tone."
         ),
         "crisis_prompt": (
             "Notice signs of crisis, self-harm, violence, or acute disorganization. "
@@ -84,9 +96,16 @@ PROMPT_LAYER_TRANSLATIONS: dict[str, dict[str, str]] = {
             "and avoid unnecessary code-switching."
         ),
         "proactive_prompt": (
-            "If the user goes quiet, hesitates, or gives an incomplete answer, "
-            "gently suggest a next step: "
-            "a clarifying question, a short action plan, or a way to continue the conversation."
+            "The user has been silent. You are initiating a proactive follow-up.\n\n"
+            "Proactive type: {proactive_type}\n"
+            "Emotional context: {emotional_context}\n\n"
+            "If proactive_type is 'follow_up', ask a brief clarifying question or suggest "
+            "a concrete next step based on the recent conversation. Keep it to 1-2 sentences.\n"
+            "If proactive_type is 'extended_silence', gently check in with the user. "
+            "Adapt your tone to the emotional context. Be warm and non-intrusive. "
+            "Offer to continue, change topic, or simply be available.\n\n"
+            "Do not mention that you are following a timer or protocol. "
+            "Sound natural, as if you genuinely noticed the pause."
         ),
         "mode_voice_guidance": (
             "Current input mode is voice. Reply briefly, naturally, and conversationally. "
@@ -110,61 +129,71 @@ PROMPT_LAYER_TRANSLATIONS: dict[str, dict[str, str]] = {
 }
 
 SAMPLE_KNOWLEDGE_SOURCE = ManifestSource(
-    file="seed-sample.html",
+    file="seed-sample",
     source_type="article",
     title="Grounding Techniques for Acute Stress",
     language="en",
     author="Twype Editorial",
-    url="https://example.local/grounding-techniques",
+    url=None,
     tags=["psychology", "stress", "grounding"],
 )
 
-SAMPLE_KNOWLEDGE_CHUNKS: list[EmbeddedChunk] = [
-    EmbeddedChunk(
-        content=(
+SAMPLE_KNOWLEDGE_CHUNKS: list[dict[str, str | int | None]] = [
+    {
+        "content": (
             "Grounding techniques help people return attention to the present moment when acute "
             "stress, panic, or intrusive thoughts narrow their focus. A simple first step is to "
             "name five things you can see, four you can touch, three you can hear, two you can "
             "smell, and one you can taste."
         ),
-        section="Sensory orientation",
-        page_range=None,
-        language="en",
-        token_count=58,
-        embedding=[((index % 17) + 1) / 1000 for index in range(EMBEDDING_DIMENSION)],
-    ),
-    EmbeddedChunk(
-        content=(
+        "section": "Sensory orientation",
+        "page_range": None,
+        "token_count": 58,
+    },
+    {
+        "content": (
             "Breathing exercises work best when the pace is slightly slower than the person's "
             "usual rhythm. One practical pattern is inhale for four counts, pause for one, and "
             "exhale for six. The longer exhale can reduce physiological arousal without requiring "
             "special equipment or a quiet room."
         ),
-        section="Breathing reset",
-        page_range=None,
-        language="en",
-        token_count=54,
-        embedding=[((index % 23) + 2) / 1000 for index in range(EMBEDDING_DIMENSION)],
-    ),
-    EmbeddedChunk(
-        content=(
+        "section": "Breathing reset",
+        "page_range": None,
+        "token_count": 54,
+    },
+    {
+        "content": (
             "After the immediate stress wave drops, it is useful to re-establish orientation: "
             "note where you are, what time it is, and what the next safe action will be. A short "
             "follow-up plan such as drinking water, texting a trusted person, or stepping outside "
             "can prevent the person from sliding back into confusion."
         ),
-        section="Next safe action",
-        page_range=None,
-        language="en",
-        token_count=57,
-        embedding=[((index % 29) + 3) / 1000 for index in range(EMBEDDING_DIMENSION)],
-    ),
+        "section": "Next safe action",
+        "page_range": None,
+        "token_count": 57,
+    },
 ]
+
+
+class EmbeddingClientProtocol(Protocol):
+    async def embed_inputs(self, inputs: list[EmbeddingInput]) -> list[list[float]]: ...
 
 
 def _require_database_url() -> None:
     if not os.environ.get("DATABASE_URL"):
         raise RuntimeError("DATABASE_URL is not set")
+
+
+def _require_google_api_key() -> str:
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError("GOOGLE_API_KEY is not set")
+    return api_key
+
+
+def _should_seed_test_user() -> bool:
+    raw_value = os.environ.get("TWYPE_SEED_INCLUDE_TEST_USER", "false").strip().lower()
+    return raw_value in {"1", "true", "yes", "on"}
 
 
 def _password_hash(plaintext: str) -> str:
@@ -241,11 +270,46 @@ async def seed_tts_config() -> None:
         await session.execute(stmt)
 
 
-async def seed_knowledge_data() -> None:
+async def _build_sample_knowledge_chunks(
+    *,
+    embedding_client: EmbeddingClientProtocol | None = None,
+) -> list[EmbeddedChunk]:
+    resolved_embedding_client = embedding_client or EmbeddingClient(
+        EmbeddingSettings(api_key=_require_google_api_key())
+    )
+    embedding_inputs = [
+        EmbeddingInput(
+            text=str(chunk["content"]),
+            title=SAMPLE_KNOWLEDGE_SOURCE.title,
+            task_type="RETRIEVAL_DOCUMENT",
+        )
+        for chunk in SAMPLE_KNOWLEDGE_CHUNKS
+    ]
+    embeddings = await resolved_embedding_client.embed_inputs(embedding_inputs)
+    if len(embeddings) != len(SAMPLE_KNOWLEDGE_CHUNKS):
+        raise RuntimeError("sample knowledge embedding count does not match seeded chunks")
+
+    return [
+        EmbeddedChunk(
+            content=str(chunk["content"]),
+            section=str(chunk["section"]) if chunk["section"] is not None else None,
+            page_range=str(chunk["page_range"]) if chunk["page_range"] is not None else None,
+            language=SAMPLE_KNOWLEDGE_SOURCE.language,
+            token_count=int(chunk["token_count"]),
+            embedding=embedding,
+        )
+        for chunk, embedding in zip(SAMPLE_KNOWLEDGE_CHUNKS, embeddings, strict=True)
+    ]
+
+
+async def seed_knowledge_data(
+    *,
+    embedding_client: EmbeddingClientProtocol | None = None,
+) -> None:
     loader = DatabaseLoader()
     prepared_source = PreparedSource(
         source=SAMPLE_KNOWLEDGE_SOURCE,
-        chunks=SAMPLE_KNOWLEDGE_CHUNKS,
+        chunks=await _build_sample_knowledge_chunks(embedding_client=embedding_client),
     )
 
     async with session_scope() as session:
@@ -257,7 +321,10 @@ async def main() -> None:
     _require_database_url()
 
     logger.info("Seeding database")
-    await seed_user()
+    if _should_seed_test_user():
+        await seed_user()
+    else:
+        logger.info("Skipping test user seed; set TWYPE_SEED_INCLUDE_TEST_USER=true to enable it")
     await seed_agent_config()
     await seed_tts_config()
     await seed_knowledge_data()

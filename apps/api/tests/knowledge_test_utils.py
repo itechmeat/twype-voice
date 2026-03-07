@@ -23,10 +23,7 @@ def make_manifest_source(**overrides: object) -> ManifestSource:
 
 def _pdf_stream(text: str) -> str:
     escaped = (
-        text.replace("\\", "\\\\")
-        .replace("(", "\\(")
-        .replace(")", "\\)")
-        .replace("\n", "\\n")
+        text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)").replace("\n", "\\n")
     )
     return f"BT /F1 18 Tf 50 100 Td ({escaped}) Tj ET"
 

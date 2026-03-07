@@ -108,18 +108,23 @@ def _make_prompt_bundle() -> PromptBundle:
             "voice_prompt": "Voice",
             "mode_voice_guidance": "Voice guidance",
             "mode_text_guidance": "Text guidance",
+            "proactive_prompt": (
+                "Proactive type: {proactive_type}. Emotional context: {emotional_context}."
+            ),
         },
         versions={
             "system_prompt": 1,
             "voice_prompt": 1,
             "mode_voice_guidance": 1,
             "mode_text_guidance": 1,
+            "proactive_prompt": 1,
         },
         resolved_locales={
             "system_prompt": "en",
             "voice_prompt": "en",
             "mode_voice_guidance": "en",
             "mode_text_guidance": "en",
+            "proactive_prompt": "en",
         },
     )
 
@@ -147,6 +152,7 @@ def _patch_prompt_loading(
     monkeypatch.setattr(main_module, "load_prompt_bundle", fake_load_prompt_bundle)
 
     if save_snapshot:
+
         async def fake_save_config_snapshot(sessionmaker, session_id, prompt_bundle) -> None:
             _ = (sessionmaker, session_id, prompt_bundle)
 
@@ -222,6 +228,9 @@ async def test_entrypoint_starts_agent_with_db_instructions(
         "voice_prompt": "Voice",
         "mode_voice_guidance": "Voice guidance",
         "mode_text_guidance": "Text guidance",
+        "proactive_prompt": (
+            "Proactive type: {proactive_type}. Emotional context: {emotional_context}."
+        ),
     }
 
 
@@ -259,7 +268,15 @@ async def test_entrypoint_handles_text_chat_message_via_data_channel(
 
     monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
 
-    async def fake_save_transcript(session_id, text, sentiment_raw, *, mode="voice"):
+    async def fake_save_transcript(
+        session_id,
+        text,
+        sentiment_raw,
+        *,
+        mode="voice",
+        valence=None,
+        arousal=None,
+    ):
         saved_user_messages.append(
             {
                 "session_id": session_id,
@@ -299,9 +316,13 @@ async def test_entrypoint_handles_text_chat_message_via_data_channel(
             }
         )
 
+    async def fake_publish_emotional_state(room, **kwargs) -> None:
+        pass
+
     monkeypatch.setattr(main_module, "save_transcript", fake_save_transcript)
     monkeypatch.setattr(main_module, "save_agent_response", fake_save_agent_response)
     monkeypatch.setattr(main_module, "publish_chat_response", fake_publish_chat_response)
+    monkeypatch.setattr(main_module, "publish_emotional_state", fake_publish_emotional_state)
 
     await main_module.entrypoint(ctx)
 
@@ -365,7 +386,15 @@ async def test_entrypoint_keeps_voice_persistence_and_transcript_publishing(
 
     monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
 
-    async def fake_save_transcript(session_id, text, sentiment_raw, *, mode="voice"):
+    async def fake_save_transcript(
+        session_id,
+        text,
+        sentiment_raw,
+        *,
+        mode="voice",
+        valence=None,
+        arousal=None,
+    ):
         saved_user_messages.append(
             {
                 "session_id": session_id,
@@ -417,9 +446,13 @@ async def test_entrypoint_keeps_voice_persistence_and_transcript_publishing(
             }
         )
 
+    async def fake_publish_emotional_state(room, **kwargs) -> None:
+        pass
+
     monkeypatch.setattr(main_module, "save_transcript", fake_save_transcript)
     monkeypatch.setattr(main_module, "save_agent_response", fake_save_agent_response)
     monkeypatch.setattr(main_module, "publish_transcript", fake_publish_transcript)
+    monkeypatch.setattr(main_module, "publish_emotional_state", fake_publish_emotional_state)
 
     await main_module.entrypoint(ctx)
 
@@ -709,7 +742,15 @@ async def test_entrypoint_switches_mode_from_text_to_voice(
 
     monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
 
-    async def fake_save_transcript(session_id, text, sentiment_raw, *, mode="voice"):
+    async def fake_save_transcript(
+        session_id,
+        text,
+        sentiment_raw,
+        *,
+        mode="voice",
+        valence=None,
+        arousal=None,
+    ):
         saved_user_messages.append(
             {
                 "session_id": session_id,
@@ -719,7 +760,11 @@ async def test_entrypoint_switches_mode_from_text_to_voice(
         )
         return uuid4()
 
+    async def fake_publish_emotional_state(room, **kwargs) -> None:
+        pass
+
     monkeypatch.setattr(main_module, "save_transcript", fake_save_transcript)
+    monkeypatch.setattr(main_module, "publish_emotional_state", fake_publish_emotional_state)
 
     await main_module.entrypoint(ctx)
 
@@ -746,3 +791,249 @@ async def test_entrypoint_switches_mode_from_text_to_voice(
 
     assert started_agent.mode_context.current_mode == "voice"
     assert [message["mode"] for message in saved_user_messages] == ["text", "voice"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_entrypoint_publishes_refined_emotional_state_for_same_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    published_states: list[dict[str, object]] = []
+    resolved_session_id = uuid4()
+    persisted_message_id = uuid4()
+
+    monkeypatch.setattr(main_module, "_settings", AgentSettings())
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        _ = room_name
+        return resolved_session_id
+
+    async def fake_save_transcript(
+        session_id,
+        text,
+        sentiment_raw,
+        *,
+        mode="voice",
+        valence=None,
+        arousal=None,
+    ):
+        _ = (session_id, text, sentiment_raw, mode, valence, arousal)
+        return persisted_message_id
+
+    async def fake_publish_transcript(room, **kwargs) -> None:
+        _ = (room, kwargs)
+
+    async def fake_publish_emotional_state(room, **kwargs) -> None:
+        published_states.append(kwargs)
+
+    async def fake_refine_with_llm(*_args, **_kwargs):
+        return (0.75, 0.25)
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+    monkeypatch.setattr(main_module, "save_transcript", fake_save_transcript)
+    monkeypatch.setattr(main_module, "publish_transcript", fake_publish_transcript)
+    monkeypatch.setattr(main_module, "publish_emotional_state", fake_publish_emotional_state)
+    monkeypatch.setattr(main_module, "refine_with_llm", fake_refine_with_llm)
+
+    await main_module.entrypoint(ctx)
+
+    session.handlers["user_input_transcribed"](
+        SimpleNamespace(
+            transcript="I feel overwhelmed",
+            is_final=True,
+            language="en",
+            sentiment_raw=-0.4,
+        )
+    )
+    for _ in range(10):
+        if len(published_states) >= 2:
+            break
+        await asyncio.sleep(0)
+
+    assert [state["is_refined"] for state in published_states] == [False, True]
+    assert [state["message_id"] for state in published_states] == [
+        str(persisted_message_id),
+        str(persisted_message_id),
+    ]
+    assert published_states[-1]["valence"] == 0.75
+    assert published_states[-1]["arousal"] == 0.25
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_silence_timer_fires_short_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    published_nudges: list[dict[str, object]] = []
+
+    settings = AgentSettings()
+    object.__setattr__(settings, "PROACTIVE_ENABLED", True)
+    object.__setattr__(settings, "PROACTIVE_SHORT_TIMEOUT", 0.05)
+    object.__setattr__(settings, "PROACTIVE_LONG_TIMEOUT", 0.15)
+    monkeypatch.setattr(main_module, "_settings", settings)
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        return uuid4()
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+
+    async def fake_publish_proactive_nudge(room, *, proactive_type, message_id=None) -> None:
+        published_nudges.append({"proactive_type": proactive_type})
+
+    async def fake_save_agent_response(session_id, text, *, mode="voice", **kw):
+        return uuid4()
+
+    async def fake_publish_transcript(room, **kwargs) -> None:
+        pass
+
+    monkeypatch.setattr(main_module, "publish_proactive_nudge", fake_publish_proactive_nudge)
+    monkeypatch.setattr(main_module, "save_agent_response", fake_save_agent_response)
+    monkeypatch.setattr(main_module, "publish_transcript", fake_publish_transcript)
+
+    await main_module.entrypoint(ctx)
+
+    # Manually trigger agent_speech_committed (which starts the silence timer)
+    # We need the handler to run fully, then wait for the timer to fire
+    session.handlers["agent_speech_committed"](SimpleNamespace(text="Hello"))
+    # Let the committed handler + timer short timeout run
+    await asyncio.sleep(0.2)
+
+    assert any(n["proactive_type"] == "follow_up" for n in published_nudges)
+    assert len(session.generate_reply_calls) >= 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_silence_timer_resets_on_transcript(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    published_nudges: list[dict[str, object]] = []
+
+    settings = AgentSettings()
+    object.__setattr__(settings, "PROACTIVE_ENABLED", True)
+    object.__setattr__(settings, "PROACTIVE_SHORT_TIMEOUT", 0.08)
+    object.__setattr__(settings, "PROACTIVE_LONG_TIMEOUT", 0.2)
+    monkeypatch.setattr(main_module, "_settings", settings)
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        return uuid4()
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+
+    async def fake_publish_proactive_nudge(room, *, proactive_type, message_id=None) -> None:
+        published_nudges.append({"proactive_type": proactive_type})
+
+    async def fake_publish_emotional_state(room, **kwargs) -> None:
+        pass
+
+    async def fake_save_transcript(session_id, text, sentiment_raw, *, mode="voice", **kw):
+        return uuid4()
+
+    monkeypatch.setattr(main_module, "publish_proactive_nudge", fake_publish_proactive_nudge)
+    monkeypatch.setattr(main_module, "publish_emotional_state", fake_publish_emotional_state)
+    monkeypatch.setattr(main_module, "save_transcript", fake_save_transcript)
+
+    await main_module.entrypoint(ctx)
+
+    session.handlers["agent_speech_committed"](SimpleNamespace(text="Hello"))
+    await asyncio.sleep(0.04)
+
+    session.handlers["user_input_transcribed"](
+        SimpleNamespace(transcript="hmm", is_final=False, language="en")
+    )
+    await asyncio.sleep(0.06)
+
+    assert len(published_nudges) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_proactive_speech_does_not_reset_silence_timer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    published_nudges: list[dict[str, object]] = []
+
+    settings = AgentSettings()
+    object.__setattr__(settings, "PROACTIVE_ENABLED", True)
+    object.__setattr__(settings, "PROACTIVE_SHORT_TIMEOUT", 0.05)
+    object.__setattr__(settings, "PROACTIVE_LONG_TIMEOUT", 0.15)
+    monkeypatch.setattr(main_module, "_settings", settings)
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        return uuid4()
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+
+    async def fake_publish_proactive_nudge(room, *, proactive_type, message_id=None) -> None:
+        published_nudges.append({"proactive_type": proactive_type})
+
+    async def fake_save_agent_response(session_id, text, *, mode="voice", **kw):
+        return uuid4()
+
+    async def fake_publish_transcript(room, **kwargs) -> None:
+        pass
+
+    monkeypatch.setattr(main_module, "publish_proactive_nudge", fake_publish_proactive_nudge)
+    monkeypatch.setattr(main_module, "save_agent_response", fake_save_agent_response)
+    monkeypatch.setattr(main_module, "publish_transcript", fake_publish_transcript)
+
+    await main_module.entrypoint(ctx)
+
+    # Trigger initial agent speech to start the timer
+    session.handlers["agent_speech_committed"](SimpleNamespace(text="Hello"))
+    # Wait for short timeout to fire proactive nudge
+    await asyncio.sleep(0.1)
+
+    assert any(n["proactive_type"] == "follow_up" for n in published_nudges)
+
+    # The proactive generate_reply triggers agent_speech_committed internally.
+    # Simulate it: if the guard works, timer should NOT reset, preventing infinite loop.
+    # Wait another short timeout period — no new nudge should appear because the timer
+    # was not reset by the proactive speech committed event.
+    await asyncio.sleep(0.1)
+
+    # Should not have spawned additional proactive nudges from the proactive speech itself
+    # (only the long timeout may fire from the original cycle, which is expected)
+    assert len(session.generate_reply_calls) <= 2  # at most short + long, not infinite
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_silence_timer_not_created_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+
+    settings = AgentSettings()
+    object.__setattr__(settings, "PROACTIVE_ENABLED", False)
+    monkeypatch.setattr(main_module, "_settings", settings)
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        return uuid4()
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+
+    await main_module.entrypoint(ctx)
+
+    session.handlers["agent_speech_committed"](SimpleNamespace(text="Hello"))
+    await asyncio.sleep(0.05)
+    assert len(session.generate_reply_calls) == 0

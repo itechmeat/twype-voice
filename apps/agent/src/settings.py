@@ -65,6 +65,12 @@ class AgentSettings(BaseSettings):
     RAG_LANGUAGE_BOOST: float = Field(default=1.5, ge=1.0, le=5.0)
     RAG_EMBEDDING_TIMEOUT: float = Field(default=3.0, gt=0.0)
 
+    EMOTION_LLM_MODEL: str | None = None
+
+    PROACTIVE_ENABLED: bool = True
+    PROACTIVE_SHORT_TIMEOUT: float = Field(default=15.0, ge=1.0)
+    PROACTIVE_LONG_TIMEOUT: float = Field(default=45.0, ge=1.0)
+
     @model_validator(mode="after")
     def _validate_runtime_settings(self) -> AgentSettings:
         if self.RAG_ENABLED and not self.GOOGLE_API_KEY:
@@ -75,5 +81,8 @@ class AgentSettings(BaseSettings):
 
         if self.TTS_PROVIDER == "elevenlabs" and not self.ELEVENLABS_API_KEY:
             raise ValueError("ELEVENLABS_API_KEY is required when TTS_PROVIDER=elevenlabs")
+
+        if self.PROACTIVE_ENABLED and self.PROACTIVE_LONG_TIMEOUT <= self.PROACTIVE_SHORT_TIMEOUT:
+            raise ValueError("PROACTIVE_LONG_TIMEOUT must be greater than PROACTIVE_SHORT_TIMEOUT")
 
         return self

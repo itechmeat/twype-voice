@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pytest
 from datachannel import (
     publish_chat_response,
+    publish_emotional_state,
+    publish_proactive_nudge,
     publish_structured_response,
     publish_transcript,
     receive_chat_message,
@@ -218,6 +220,58 @@ async def test_publish_structured_response_interim_is_lossy_and_omits_message_id
 
 
 @pytest.mark.asyncio
+async def test_publish_emotional_state_includes_all_fields() -> None:
+    room = _DummyRoom()
+
+    await publish_emotional_state(
+        room,
+        quadrant="distress",
+        valence=-0.6,
+        arousal=0.8,
+        trend_valence="falling",
+        trend_arousal="rising",
+        message_id="msg-123",
+    )
+
+    assert room.local_participant.calls
+    data, reliable = room.local_participant.calls[0]
+    assert reliable is True
+
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {
+        "type": "emotional_state",
+        "quadrant": "distress",
+        "valence": -0.6,
+        "arousal": 0.8,
+        "trend_valence": "falling",
+        "trend_arousal": "rising",
+        "is_refined": False,
+        "message_id": "msg-123",
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_emotional_state_omits_message_id_when_none() -> None:
+    room = _DummyRoom()
+
+    await publish_emotional_state(
+        room,
+        quadrant="neutral",
+        valence=0.0,
+        arousal=0.0,
+        trend_valence="stable",
+        trend_arousal="stable",
+    )
+
+    data, _reliable = room.local_participant.calls[0]
+    payload = json.loads(data.decode("utf-8"))
+    assert "message_id" not in payload
+    assert payload["type"] == "emotional_state"
+    assert payload["quadrant"] == "neutral"
+    assert payload["is_refined"] is False
+
+
+@pytest.mark.asyncio
 async def test_publish_structured_response_final_omits_message_id_when_missing() -> None:
     room = _DummyRoom()
 
@@ -234,4 +288,44 @@ async def test_publish_structured_response_final_omits_message_id_when_missing()
         "type": "structured_response",
         "items": [{"text": "Point A", "chunk_ids": []}],
         "is_final": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_proactive_nudge_follow_up() -> None:
+    room = _DummyRoom()
+
+    await publish_proactive_nudge(
+        room,
+        proactive_type="follow_up",
+        message_id="msg-42",
+    )
+
+    assert room.local_participant.calls
+    data, reliable = room.local_participant.calls[0]
+    assert reliable is True
+
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {
+        "type": "proactive_nudge",
+        "proactive_type": "follow_up",
+        "message_id": "msg-42",
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_proactive_nudge_omits_message_id_when_none() -> None:
+    room = _DummyRoom()
+
+    await publish_proactive_nudge(
+        room,
+        proactive_type="extended_silence",
+    )
+
+    data, reliable = room.local_participant.calls[0]
+    assert reliable is True
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {
+        "type": "proactive_nudge",
+        "proactive_type": "extended_silence",
     }
