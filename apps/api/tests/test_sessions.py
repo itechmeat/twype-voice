@@ -171,6 +171,10 @@ class TestSessionMessages:
         session.add(s)
         await session.commit()
 
-        resp = await client.get(f"/sessions/{s.id}/messages", headers=auth_headers(attacker.id))
+        headers = {
+            **auth_headers(attacker.id),
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        resp = await client.get(f"/sessions/{s.id}/messages", headers=headers)
         assert resp.status_code == 404
-        assert resp.json()["detail"] == translate("sessions.session_not_found")
+        assert resp.json()["detail"] == translate("sessions.session_not_found", locale="en-US")

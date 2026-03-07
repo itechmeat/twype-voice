@@ -199,8 +199,12 @@ class TestMiddleware:
         assert resp.json()["email"] == unique_email
 
     async def test_missing_header(self, client: AsyncClient):
-        resp = await client.get("/me")
+        resp = await client.get("/me", headers={"Accept-Language": "en-US,en;q=0.9"})
         assert resp.status_code == 401
+        assert resp.json()["detail"] == translate(
+            "auth.invalid_authentication_credentials",
+            locale="en-US",
+        )
 
     async def test_expired_access_token(
         self, client: AsyncClient, session: AsyncSession, unique_email: str

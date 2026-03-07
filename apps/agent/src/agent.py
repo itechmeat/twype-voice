@@ -490,7 +490,13 @@ class TwypeAgent(Agent):
         if intervention is not None:
             self._current_crisis_intervention = intervention
             if self._crisis_alert_publisher is not None:
-                await self._crisis_alert_publisher(intervention)
+                try:
+                    await self._crisis_alert_publisher(intervention)
+                except Exception:
+                    logger.exception(
+                        "failed to publish crisis alert response_id=%s",
+                        self._current_response_id,
+                    )
             mode_aware_chat_ctx = intervention.chat_ctx
         else:
             mode_aware_chat_ctx = self._build_mode_aware_chat_ctx(chat_ctx)

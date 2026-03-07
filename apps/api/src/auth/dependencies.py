@@ -13,7 +13,7 @@ from src.database import get_sessionmaker
 from src.localization import resolve_request_locale, translate
 from src.models.user import User
 
-_bearer_scheme = HTTPBearer()
+_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -23,10 +23,16 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 async def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     session: AsyncSession = Depends(get_session),
 ) -> User:
     locale = resolve_request_locale(request.headers.get("Accept-Language"))
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=translate("auth.invalid_authentication_credentials", locale=locale),
+        )
 
     try:
         payload = decode_token(credentials.credentials)

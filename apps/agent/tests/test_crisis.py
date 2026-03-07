@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterable
 from uuid import uuid4
 
@@ -48,13 +49,26 @@ def _contact() -> CrisisContactInfo:
 
 
 class _FakeResponse:
-    def __init__(self, content: str) -> None:
+    def __init__(
+        self,
+        content: str | None = None,
+        *,
+        payload: dict[str, object] | None = None,
+        json_error: Exception | None = None,
+    ) -> None:
         self._content = content
+        self._payload = payload
+        self._json_error = json_error
 
     def raise_for_status(self) -> None:
         return None
 
     def json(self) -> dict[str, object]:
+        if self._json_error is not None:
+            raise self._json_error
+        if self._payload is not None:
+            return self._payload
+        assert self._content is not None
         return {"choices": [{"message": {"content": self._content}}]}
 
 
@@ -196,6 +210,40 @@ async def test_llm_classifier_reject(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_llm_classifier_timeout_is_fail_safe(monkeypatch: pytest.MonkeyPatch) -> None:
     detector = _detector()
     detector._http_client = _FakeClient(error=TimeoutError())
+
+    result = await detector._classify(
+        "I want to disappear",
+        language="en",
+        keyword_match=None,
+        high_distress=True,
+    )
+
+    assert result.label == "crisis"
+    assert result.confidence == 1.0
+    assert result.fail_safe is True
+
+
+@pytest.mark.asyncio
+async def test_llm_classifier_malformed_response_is_fail_safe() -> None:
+    detector = _detector()
+    detector._http_client = _FakeClient(response=_FakeResponse(payload={}))
+
+    result = await detector._classify(
+        "I want to disappear",
+        language="en",
+        keyword_match=None,
+        high_distress=True,
+    )
+
+    assert result.label == "crisis"
+    assert result.confidence == 1.0
+    assert result.fail_safe is True
+
+
+@pytest.mark.asyncio
+async def test_llm_classifier_invalid_response_json_is_fail_safe() -> None:
+    detector = _detector()
+    detector._http_client = _FakeClient(response=_FakeResponse(json_error=ValueError("bad json")))
 
     result = await detector._classify(
         "I want to disappear",
@@ -475,6 +523,47 @@ async def test_crisis_turn_publishes_alert_and_delivers_plain_text_response(
     assert completed.crisis_intervention is not None
     assert completed.dual_layer_result.text_items == []
     assert completed.dual_layer_result.voice_text == "Please call 988 right now."
+
+
+@pytest.mark.asyncio
+async def test_crisis_turn_continues_when_alert_publish_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    published_messages: list[str] = []
+
+    class FakeDetector:
+        async def before_llm_cb(self, *_args, **_kwargs):
+            return _intervention()
+
+    async def fake_llm_node(self, chat_ctx, tools, model_settings):
+        async def _gen():
+            yield "Please call 988 right now."
+
+        return _gen()
+
+    async def fail_publish(_intervention: CrisisIntervention) -> None:
+        raise RuntimeError("data channel unavailable")
+
+    monkeypatch.setattr(agent_module.Agent, "llm_node", fake_llm_node)
+
+    agent = agent_module.TwypeAgent(
+        instructions="System",
+        mode_voice_guidance="Voice guidance",
+        mode_text_guidance="Text guidance",
+        crisis_detector=FakeDetector(),  # type: ignore[arg-type]
+    )
+    agent.mode_context.switch_to("text")
+    agent.set_crisis_alert_publisher(fail_publish)
+    agent.set_chat_response_publisher(lambda text: _capture(published_messages, text))
+
+    with caplog.at_level(logging.ERROR, logger="twype-agent"):
+        llm_stream = await agent.llm_node(_chat_ctx("I want to kill myself"), [], None)
+        result = await agent.tts_node(llm_stream, None)
+
+    assert result is None
+    assert published_messages == ["Please call 988 right now."]
+    assert "failed to publish crisis alert" in caplog.text
 
 
 async def _capture(target: list, value) -> None:

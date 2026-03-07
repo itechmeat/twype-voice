@@ -416,10 +416,10 @@ class CrisisDetector:
                 fail_safe=True,
             )
 
-        content = self._extract_completion_content(response.json())
         try:
+            content = self._extract_completion_content(response.json())
             parsed = json.loads(content)
-        except json.JSONDecodeError:
+        except (TypeError, ValueError, json.JSONDecodeError):
             logger.warning("crisis classifier returned invalid JSON; applying fail-safe")
             return CrisisClassification(
                 label="crisis",
