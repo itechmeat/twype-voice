@@ -10,9 +10,14 @@ from agent import (
     build_vad,
     format_participant,
 )
+from crisis import CrisisDetector
 from datachannel import (
     publish_chat_response,
+    publish_crisis_alert,
     publish_emotional_state,
+    publish_interruption_false,
+    publish_interruption_resolved,
+    publish_interruption_started,
     publish_proactive_nudge,
     publish_structured_response,
     publish_transcript,
@@ -57,6 +62,8 @@ from tts import build_tts
 from src.localization import translate
 
 logger = logging.getLogger("twype-agent")
+_INTERRUPTION_CONTINUATION_CONTEXT_LIMIT = 400
+_FALSE_INTERRUPTION_CONTINUATION_TIMEOUT = 10.0
 
 
 def configure_logging(*, level: str) -> None:
@@ -95,6 +102,26 @@ def prewarm(proc: JobProcess) -> None:
         proc.userdata["rag_engine"] = RagEngine(settings, sessionmaker)
     else:
         proc.userdata["rag_engine"] = None
+
+
+def _build_interruption_continuation_instruction(partial_response: str | None) -> str:
+    clipped_response = (partial_response or "").strip()
+    if len(clipped_response) > _INTERRUPTION_CONTINUATION_CONTEXT_LIMIT:
+        clipped_response = clipped_response[-_INTERRUPTION_CONTINUATION_CONTEXT_LIMIT :]
+
+    if clipped_response:
+        return (
+            "The previous assistant reply was falsely interrupted and buffered audio is exhausted. "
+            "Continue the interrupted reply from where it stopped in 1-2 concise sentences. "
+            "Do not restart the answer.\n\n"
+            f"Partial reply:\n{clipped_response}"
+        )
+
+    return (
+        "The previous assistant reply was falsely interrupted and buffered audio is exhausted. "
+        "Continue the interrupted reply from where it stopped in 1-2 concise sentences. "
+        "Do not restart the answer."
+    )
 
 
 def _extract_sentiment_raw(ev: object) -> float | None:
@@ -235,10 +262,33 @@ async def entrypoint(ctx: JobContext) -> None:
         default_language=last_language,
         rag_engine=ctx.proc.userdata.get("rag_engine"),
     )
+    if settings.CRISIS_ENABLED and callable(db_sessionmaker):
+        agent.crisis_detector = CrisisDetector(
+            sessionmaker=db_sessionmaker,
+            base_url=settings.LITELLM_URL.rstrip("/"),
+            api_key=settings.LITELLM_MASTER_KEY,
+            model=settings.LLM_MODEL,
+            enabled=settings.CRISIS_ENABLED,
+        )
+        await agent.crisis_detector.load_keywords()
+        await agent.crisis_detector.preload_contacts(prompt_locale)
     emotion_refinement_task: asyncio.Task[None] | None = None
     emotion_analysis_revision = 0
 
     proactive_prompt_template = prompt_bundle.layers.get("proactive_prompt", "")
+    participant_id = getattr(participant, "identity", None) or participant_label
+
+    def _log_interruption_info(event_type: str) -> None:
+        logger.info(
+            "interruption event, room=%s participant_id=%s event_type=%s",
+            ctx.room.name,
+            participant_id,
+            event_type,
+        )
+
+    def _has_active_interruption() -> bool:
+        current_speech = getattr(session, "current_speech", None)
+        return bool(current_speech is not None and getattr(current_speech, "interrupted", False))
 
     def _build_emotional_context_summary() -> str:
         state = agent.current_emotional_state
@@ -331,6 +381,14 @@ async def entrypoint(ctx: JobContext) -> None:
             ],
             is_final=True,
             message_id=message_id,
+        )
+    )
+    agent.set_crisis_alert_publisher(
+        lambda intervention: publish_crisis_alert(
+            ctx.room,
+            crisis_category=intervention.category,
+            contacts=[contact.as_payload() for contact in intervention.contacts],
+            session_language=intervention.session_language,
         )
     )
 
@@ -494,6 +552,20 @@ async def entrypoint(ctx: JobContext) -> None:
                 )
                 return
 
+            interruption_detected = _has_active_interruption()
+            if interruption_detected:
+                _log_interruption_info("interruption_started")
+                interrupted_text, interrupted_tokens = agent.remember_interrupted_response()
+                logger.debug(
+                    "llm generation cancelled, room=%s participant_id=%s "
+                    "generated_tokens=%s partial_text=%r",
+                    ctx.room.name,
+                    participant_id,
+                    interrupted_tokens,
+                    interrupted_text,
+                )
+                await publish_interruption_started(ctx.room)
+
             sentiment_raw = _extract_sentiment_raw(ev)
             message_id = None
 
@@ -510,6 +582,12 @@ async def entrypoint(ctx: JobContext) -> None:
                 )
                 if inserted_id is not None:
                     message_id = str(inserted_id)
+                    agent.remember_pending_user_input(
+                        text=cleaned,
+                        message_id=inserted_id,
+                        language=language,
+                        mode=agent.mode_context.current_mode,
+                    )
 
             await publish_transcript(
                 ctx.room,
@@ -522,6 +600,13 @@ async def entrypoint(ctx: JobContext) -> None:
             )
 
             await _run_emotional_analysis(cleaned, sentiment_raw, (fast_v, fast_a), message_id)
+
+            if interruption_detected:
+                _log_interruption_info("interruption_resolved")
+                await publish_interruption_resolved(
+                    ctx.room,
+                    resumed=False,
+                )
         except Exception:
             logger.exception("failed to handle transcript event, room=%s", ctx.room.name)
 
@@ -544,6 +629,13 @@ async def entrypoint(ctx: JobContext) -> None:
             message = getattr(ev, "item", None)
             role = str(getattr(message, "role", "assistant"))
             if message is not None and role != "assistant":
+                return
+            if bool(getattr(message, "interrupted", False) or getattr(ev, "interrupted", False)):
+                logger.debug(
+                    "ignored interrupted assistant message, room=%s participant_id=%s",
+                    ctx.room.name,
+                    participant_id,
+                )
                 return
 
             if message is not None:
@@ -579,13 +671,23 @@ async def entrypoint(ctx: JobContext) -> None:
                 else None
             )
             message_id = str(response_id) if response_id is not None else None
+            is_crisis_response = (
+                completed_response is not None
+                and completed_response.crisis_intervention is not None
+            ) or (completed_response is None and agent.current_crisis_intervention is not None)
             if db_session_id is not None:
+                save_kwargs: dict[str, object] = {
+                    "mode": response_mode,
+                    "source_ids": source_ids,
+                    "message_id": response_id,
+                }
+                if is_crisis_response:
+                    save_kwargs["is_crisis"] = True
+
                 inserted_id = await save_agent_response(
                     db_session_id,
                     text,
-                    mode=response_mode,
-                    source_ids=source_ids,
-                    message_id=response_id,
+                    **save_kwargs,
                 )
                 if inserted_id is not None and message_id is None:
                     message_id = str(inserted_id)
@@ -618,6 +720,43 @@ async def entrypoint(ctx: JobContext) -> None:
             logger.exception("failed to handle assistant message event, room=%s", ctx.room.name)
         finally:
             agent.clear_current_response_id()
+
+    async def handle_false_interruption_event(ev: object) -> None:
+        try:
+            resumed = bool(getattr(ev, "resumed", False))
+            if silence_timer is not None:
+                silence_timer.reset()
+
+            _log_interruption_info("interruption_false")
+            await publish_interruption_false(
+                ctx.room,
+                resumed=resumed,
+            )
+
+            if resumed:
+                return
+
+            continuation_prompt = _build_interruption_continuation_instruction(
+                agent.consume_interrupted_response()
+            )
+            speech_handle = session.generate_reply(
+                instructions=continuation_prompt,
+            )
+            try:
+                await asyncio.wait_for(
+                    speech_handle,
+                    timeout=_FALSE_INTERRUPTION_CONTINUATION_TIMEOUT,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "false interruption continuation timed out, room=%s participant_id=%s "
+                    "timeout=%s",
+                    ctx.room.name,
+                    participant_id,
+                    _FALSE_INTERRUPTION_CONTINUATION_TIMEOUT,
+                )
+        except Exception:
+            logger.exception("failed to handle false interruption, room=%s", ctx.room.name)
 
     async def handle_error_event(ev: object) -> None:
         try:
@@ -717,6 +856,12 @@ async def entrypoint(ctx: JobContext) -> None:
                 )
                 if inserted_id is not None:
                     text_message_id = str(inserted_id)
+                    agent.remember_pending_user_input(
+                        text=text,
+                        message_id=inserted_id,
+                        language=last_language,
+                        mode=agent.mode_context.current_mode,
+                    )
 
             await _run_emotional_analysis(text, None, (fast_v, fast_a), text_message_id)
 
@@ -747,6 +892,12 @@ async def entrypoint(ctx: JobContext) -> None:
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
 
+    @session.on("agent_false_interruption")
+    def on_agent_false_interruption(ev: object) -> None:
+        task = asyncio.create_task(handle_false_interruption_event(ev))
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+
     @ctx.room.on("data_received")
     def on_data_received(data_packet: object) -> None:
         task = asyncio.create_task(handle_data_received_event(data_packet))
@@ -756,6 +907,14 @@ async def entrypoint(ctx: JobContext) -> None:
     @session.on("error")
     def on_error(ev: object) -> None:
         task = asyncio.create_task(handle_error_event(ev))
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+
+    @session.on("close")
+    def on_close(_ev: object) -> None:
+        if agent.crisis_detector is None:
+            return
+        task = asyncio.create_task(agent.crisis_detector.aclose())
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
 

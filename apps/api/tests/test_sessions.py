@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from src.localization import translate
 from src.models.message import Message
 from src.models.session import Session
 
@@ -172,3 +173,4 @@ class TestSessionMessages:
 
         resp = await client.get(f"/sessions/{s.id}/messages", headers=auth_headers(attacker.id))
         assert resp.status_code == 404
+        assert resp.json()["detail"] == translate("sessions.session_not_found")

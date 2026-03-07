@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, String, Text, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -37,6 +37,7 @@ class Message(Base):
     arousal: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     source_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    is_crisis: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")

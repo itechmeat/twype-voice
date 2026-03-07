@@ -160,6 +160,45 @@ async def publish_proactive_nudge(
     )
 
 
+async def publish_interruption_started(room: Any) -> None:
+    await room.local_participant.publish_data(
+        _encode_json({"type": "interruption_started"}),
+        reliable=True,
+    )
+
+
+async def publish_interruption_resolved(
+    room: Any,
+    *,
+    resumed: bool,
+) -> None:
+    await room.local_participant.publish_data(
+        _encode_json(
+            {
+                "type": "interruption_resolved",
+                "resumed": resumed,
+            }
+        ),
+        reliable=True,
+    )
+
+
+async def publish_interruption_false(
+    room: Any,
+    *,
+    resumed: bool,
+) -> None:
+    await room.local_participant.publish_data(
+        _encode_json(
+            {
+                "type": "interruption_false",
+                "resumed": resumed,
+            }
+        ),
+        reliable=True,
+    )
+
+
 async def publish_structured_response(
     room: Any,
     *,
@@ -179,4 +218,24 @@ async def publish_structured_response(
     await room.local_participant.publish_data(
         _encode_json(payload),
         reliable=is_final,
+    )
+
+
+async def publish_crisis_alert(
+    room: Any,
+    *,
+    crisis_category: str,
+    contacts: list[dict[str, Any]],
+    session_language: str,
+) -> None:
+    payload: dict[str, Any] = {
+        "type": "crisis_alert",
+        "crisis_category": crisis_category,
+        "contacts": contacts,
+        "session_language": session_language,
+    }
+
+    await room.local_participant.publish_data(
+        _encode_json(payload),
+        reliable=True,
     )

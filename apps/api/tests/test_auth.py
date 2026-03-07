@@ -9,6 +9,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.jwt import create_access_token, create_refresh_token
+from src.localization import translate
 from src.models.user import User
 
 from tests.helpers import create_verified_user
@@ -219,13 +220,13 @@ class TestMiddleware:
         token = create_refresh_token(user.id)
         resp = await client.get("/me", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 401
-        assert "token type" in resp.json()["detail"].lower()
+        assert resp.json()["detail"] == translate("auth.invalid_token_type")
 
     async def test_user_not_found(self, client: AsyncClient):
         token = create_access_token(uuid.uuid4())
         resp = await client.get("/me", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 401
-        assert "not found" in resp.json()["detail"].lower()
+        assert resp.json()["detail"] == translate("auth.user_not_found")
 
     async def test_unverified_user_with_token(
         self, client: AsyncClient, session: AsyncSession, unique_email: str
@@ -239,4 +240,4 @@ class TestMiddleware:
         token = create_access_token(user.id)
         resp = await client.get("/me", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 403
-        assert "not verified" in resp.json()["detail"].lower()
+        assert resp.json()["detail"] == translate("auth.email_not_verified")

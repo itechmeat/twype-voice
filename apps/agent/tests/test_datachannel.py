@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import pytest
 from datachannel import (
     publish_chat_response,
+    publish_crisis_alert,
     publish_emotional_state,
+    publish_interruption_false,
+    publish_interruption_resolved,
+    publish_interruption_started,
     publish_proactive_nudge,
     publish_structured_response,
     publish_transcript,
@@ -220,6 +224,42 @@ async def test_publish_structured_response_interim_is_lossy_and_omits_message_id
 
 
 @pytest.mark.asyncio
+async def test_publish_crisis_alert_is_reliable_and_includes_contacts() -> None:
+    room = _DummyRoom()
+
+    await publish_crisis_alert(
+        room,
+        crisis_category="suicide",
+        contacts=[
+            {
+                "name": "988 Suicide & Crisis Lifeline",
+                "phone": "988",
+                "url": "https://988lifeline.org/",
+                "description": "Call or text 988",
+            }
+        ],
+        session_language="en",
+    )
+
+    data, reliable = room.local_participant.calls[0]
+    assert reliable is True
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {
+        "type": "crisis_alert",
+        "crisis_category": "suicide",
+        "contacts": [
+            {
+                "name": "988 Suicide & Crisis Lifeline",
+                "phone": "988",
+                "url": "https://988lifeline.org/",
+                "description": "Call or text 988",
+            }
+        ],
+        "session_language": "en",
+    }
+
+
+@pytest.mark.asyncio
 async def test_publish_emotional_state_includes_all_fields() -> None:
     room = _DummyRoom()
 
@@ -328,4 +368,70 @@ async def test_publish_proactive_nudge_omits_message_id_when_none() -> None:
     assert payload == {
         "type": "proactive_nudge",
         "proactive_type": "extended_silence",
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_interruption_started_is_reliable() -> None:
+    room = _DummyRoom()
+
+    await publish_interruption_started(room)
+
+    data, reliable = room.local_participant.calls[0]
+    assert reliable is True
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {"type": "interruption_started"}
+
+
+@pytest.mark.asyncio
+async def test_publish_interruption_resolved_includes_resumed_flag() -> None:
+    room = _DummyRoom()
+
+    await publish_interruption_resolved(
+        room,
+        resumed=False,
+    )
+
+    data, reliable = room.local_participant.calls[0]
+    assert reliable is True
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {
+        "type": "interruption_resolved",
+        "resumed": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_interruption_resolved_supports_resumed_true() -> None:
+    room = _DummyRoom()
+
+    await publish_interruption_resolved(
+        room,
+        resumed=True,
+    )
+
+    data, reliable = room.local_participant.calls[0]
+    assert reliable is True
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {
+        "type": "interruption_resolved",
+        "resumed": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_interruption_false_includes_resumed_flag() -> None:
+    room = _DummyRoom()
+
+    await publish_interruption_false(
+        room,
+        resumed=True,
+    )
+
+    data, reliable = room.local_participant.calls[0]
+    assert reliable is True
+    payload = json.loads(data.decode("utf-8"))
+    assert payload == {
+        "type": "interruption_false",
+        "resumed": True,
     }

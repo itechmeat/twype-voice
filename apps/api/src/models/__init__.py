@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .agent_config import AgentConfig
 from .base import NAMING_CONVENTION, Base
+from .crisis_contact import CrisisContact
 from .knowledge_chunk import KnowledgeChunk
 from .knowledge_source import KnowledgeSource
 from .message import Message
@@ -13,6 +14,7 @@ __all__ = [
     "NAMING_CONVENTION",
     "AgentConfig",
     "Base",
+    "CrisisContact",
     "KnowledgeChunk",
     "KnowledgeSource",
     "Message",

@@ -51,6 +51,7 @@ async def save_transcript(
     mode: Literal["voice", "text"] = "voice",
     valence: float | None = None,
     arousal: float | None = None,
+    is_crisis: bool = False,
 ) -> uuid.UUID | None:
     cleaned_text = text.strip()
     if not cleaned_text:
@@ -71,6 +72,7 @@ async def save_transcript(
             sentiment_raw=sentiment_raw if mode == "voice" else None,
             valence=valence,
             arousal=arousal,
+            is_crisis=is_crisis,
         )
         session.add(message)
         await session.commit()
@@ -85,6 +87,7 @@ async def save_agent_response(
     mode: Literal["voice", "text"] = "voice",
     source_ids: list[str] | None = None,
     message_id: uuid.UUID | None = None,
+    is_crisis: bool = False,
 ) -> uuid.UUID | None:
     cleaned_text = text.strip()
     if not cleaned_text:
@@ -105,6 +108,7 @@ async def save_agent_response(
             voice_transcript=cleaned_text if mode == "voice" else None,
             sentiment_raw=None,
             source_ids=source_ids or None,
+            is_crisis=is_crisis,
         )
         session.add(message)
         await session.commit()
