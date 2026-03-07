@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.jwt import create_access_token, create_refresh_token
 from src.models.user import User
 
+from tests.helpers import create_verified_user
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -18,14 +20,6 @@ from src.models.user import User
 
 async def _register(client: AsyncClient, email: str, password: str = "strongpass123"):
     return await client.post("/auth/register", json={"email": email, "password": password})
-
-
-async def _create_verified_user(session: AsyncSession, email: str, password: str = "strongpass123"):
-    pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    user = User(email=email, password_hash=pw_hash, is_verified=True)
-    session.add(user)
-    await session.flush()
-    return user
 
 
 async def _get_verification_code(session: AsyncSession, email: str) -> str:
@@ -122,7 +116,7 @@ class TestLogin:
     async def test_successful_login(
         self, client: AsyncClient, session: AsyncSession, unique_email: str
     ):
-        await _create_verified_user(session, unique_email)
+        await create_verified_user(session, unique_email)
         await session.commit()
         resp = await client.post(
             "/auth/login", json={"email": unique_email, "password": "strongpass123"}
@@ -135,7 +129,7 @@ class TestLogin:
     async def test_wrong_password(
         self, client: AsyncClient, session: AsyncSession, unique_email: str
     ):
-        await _create_verified_user(session, unique_email)
+        await create_verified_user(session, unique_email)
         await session.commit()
         resp = await client.post(
             "/auth/login", json={"email": unique_email, "password": "wrongpass123"}
@@ -168,7 +162,7 @@ class TestRefresh:
     async def test_successful_refresh(
         self, client: AsyncClient, session: AsyncSession, unique_email: str
     ):
-        user = await _create_verified_user(session, unique_email)
+        user = await create_verified_user(session, unique_email)
         await session.commit()
         refresh_token = create_refresh_token(user.id)
         resp = await client.post("/auth/refresh", json={"refresh_token": refresh_token})
@@ -196,7 +190,7 @@ class TestRefresh:
 
 class TestMiddleware:
     async def test_valid_token(self, client: AsyncClient, session: AsyncSession, unique_email: str):
-        user = await _create_verified_user(session, unique_email)
+        user = await create_verified_user(session, unique_email)
         await session.commit()
         token = create_access_token(user.id)
         resp = await client.get("/me", headers={"Authorization": f"Bearer {token}"})
@@ -210,7 +204,7 @@ class TestMiddleware:
     async def test_expired_access_token(
         self, client: AsyncClient, session: AsyncSession, unique_email: str
     ):
-        user = await _create_verified_user(session, unique_email)
+        user = await create_verified_user(session, unique_email)
         await session.commit()
         with patch("src.auth.jwt.ACCESS_TOKEN_EXPIRE_MINUTES", -1):
             token = create_access_token(user.id)
@@ -220,7 +214,7 @@ class TestMiddleware:
     async def test_refresh_token_as_access(
         self, client: AsyncClient, session: AsyncSession, unique_email: str
     ):
-        user = await _create_verified_user(session, unique_email)
+        user = await create_verified_user(session, unique_email)
         await session.commit()
         token = create_refresh_token(user.id)
         resp = await client.get("/me", headers={"Authorization": f"Bearer {token}"})

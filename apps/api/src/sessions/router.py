@@ -90,6 +90,7 @@ async def list_messages(
             role=m.role,
             mode=m.mode,
             content=m.content,
+            source_ids=m.source_ids,
             created_at=m.created_at,
         )
         for m in messages

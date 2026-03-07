@@ -35,6 +35,16 @@ project translation system instead of being hardcoded in source files.
 - Frontend: use the frontend translation/localization system for all UI copy and localized
   user-facing text.
 
+Production code MUST follow SOLID, DRY, and KISS. Prefer the simplest design that correctly
+implements the current story without duplication, hidden coupling, or speculative abstractions.
+
+Production code MUST NOT contain stubs, mocks, fake implementations, placeholder business logic,
+or non-working fallbacks for features that are already implemented or technically possible now.
+If a behavior cannot be implemented correctly yet because it depends on a not-yet-completed story
+from `docs/plan.md`, add a concise `TODO` that references the blocking story and describes what
+remains to be implemented. Do not use `TODO` as a substitute for finishing work that can already
+be completed properly.
+
 ## Skills & Docs Attribution
 
 Every final report MUST include at the end:
@@ -177,7 +187,7 @@ Defined in `.env` (never committed). Template in `.env.example`. Key groups:
 
 - **API:** `DATABASE_URL`, `JWT_SECRET`, `RESEND_API_KEY`, `LIVEKIT_API_KEY/SECRET/URL`, `GOOGLE_API_KEY`
 - **Agent:** `LIVEKIT_*`, `LITELLM_URL`, `DATABASE_URL`, `DEEPGRAM_API_KEY`, `INWORLD_API_KEY`, `ELEVENLABS_API_KEY`
-- **LiteLLM:** `GOOGLE_API_KEY`, `OPENAI_API_KEY` (optional fallback)
+- **LiteLLM:** `GOOGLE_API_KEY`, `OPENAI_API_KEY` (optional additional provider)
 - **coturn:** `TURN_USERNAME`, `TURN_PASSWORD`
 
 ## Secrets and Blockers

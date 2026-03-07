@@ -41,10 +41,23 @@ PROMPT_LAYER_TRANSLATIONS: dict[str, dict[str, str]] = {
             "Start with the main point, then offer one useful next step or a short clarification."
         ),
         "dual_layer_prompt": (
-            "Structure each answer in two layers: "
-            "a short voice-friendly version and a more precise "
-            "text-channel formulation when it helps. "
-            "Avoid unnecessary repetition and keep the meaning consistent."
+            "Format every answer in two explicit sections using these delimiters exactly: "
+            "---VOICE--- and ---TEXT---. "
+            "In ---VOICE---, write 2-5 natural conversational sentences suitable for speech. "
+            "In ---TEXT---, write bullet points starting with - or * for the data channel. "
+            "When you use knowledge base context, cite the referenced chunk numbers with [N] "
+            "markers that match the injected context order, for example [1] or [2][4]. "
+            "Do not invent source numbers. If a point is your own reasoning or synthesis, leave "
+            "it without [N] markers. Keep the meaning aligned between both sections.\n\n"
+            "Example:\n"
+            "---VOICE---\n"
+            "The quickest way to reduce acute stress is to slow the breath "
+            "and reorient to the room. "
+            "Start with one simple exercise, then decide on the next safe action.\n"
+            "---TEXT---\n"
+            "- A longer exhale can reduce physiological arousal [2]\n"
+            "- Sensory grounding helps bring attention back to the present moment [1]\n"
+            "- After the stress wave drops, choose one concrete next step"
         ),
         "emotion_prompt": (
             "Take the user's emotional signals into account: "

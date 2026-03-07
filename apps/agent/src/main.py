@@ -10,7 +10,12 @@ from agent import (
     build_vad,
     format_participant,
 )
-from datachannel import publish_chat_response, publish_transcript, receive_chat_message
+from datachannel import (
+    publish_chat_response,
+    publish_structured_response,
+    publish_transcript,
+    receive_chat_message,
+)
 from db import build_engine, build_sessionmaker
 from livekit.agents import (
     AutoSubscribe,
@@ -24,11 +29,9 @@ from livekit.agents import (
 from livekit.agents.voice.room_io import RoomInputOptions
 from llm import build_llm
 from prompts import (
-    FALLBACK_SYSTEM_PROMPT,
-    FALLBACK_TEXT_GUIDANCE,
-    FALLBACK_VOICE_GUIDANCE,
     build_instructions,
     load_prompt_bundle,
+    require_prompt_layer,
     resolve_prompt_locale,
     save_config_snapshot,
 )
@@ -156,70 +159,39 @@ async def entrypoint(ctx: JobContext) -> None:
     participant_label = format_participant(participant)
     logger.info("participant joined, room=%s participant=%s", ctx.room.name, participant_label)
 
-    db_session_id = None
-    try:
-        db_session_id = await resolve_session_id(ctx.room.name)
-    except Exception:
-        logger.exception("failed to resolve session id, room=%s", ctx.room.name)
-
-    if db_session_id is None:
-        logger.error(
-            "session not found in db; transcript persistence disabled, room=%s",
-            ctx.room.name,
-        )
-
-    instructions = FALLBACK_SYSTEM_PROMPT
-    prompt_bundle = None
     db_sessionmaker = ctx.proc.userdata.get("db_sessionmaker")
     if db_sessionmaker is None:
-        logger.error(
-            "db sessionmaker is not configured; using fallback prompt, room=%s",
-            ctx.room.name,
-        )
-    else:
-        try:
-            prompt_locale = await resolve_prompt_locale(
-                db_sessionmaker,
-                db_session_id,
-                preferred_locale=last_language,
-                default_locale=settings.PROMPT_DEFAULT_LOCALE,
-            )
-            prompt_bundle = await load_prompt_bundle(
-                db_sessionmaker,
-                prompt_locale,
-                default_locale=settings.PROMPT_DEFAULT_LOCALE,
-            )
-            instructions = build_instructions(prompt_bundle.layers)
-            if not instructions.strip():
-                raise RuntimeError("prompt layers are empty")
-            logger.info(
-                "loaded prompt bundle, requested_locale=%s locale_chain=%s matched_layers=%s",
-                prompt_bundle.requested_locale,
-                ",".join(prompt_bundle.locale_chain),
-                len(prompt_bundle.layers),
-            )
-        except Exception:
-            instructions = FALLBACK_SYSTEM_PROMPT
-            prompt_bundle = None
-            logger.exception(
-                "failed to build instructions from db; using fallback, room=%s",
-                ctx.room.name,
-            )
-        else:
-            if db_session_id is None:
-                logger.warning(
-                    "config snapshot skipped because session id is unavailable, room=%s",
-                    ctx.room.name,
-                )
-            else:
-                try:
-                    await save_config_snapshot(db_sessionmaker, db_session_id, prompt_bundle)
-                except Exception:
-                    logger.exception(
-                        "failed to save config snapshot, room=%s session_id=%s",
-                        ctx.room.name,
-                        db_session_id,
-                    )
+        raise RuntimeError("db sessionmaker is not configured")
+
+    db_session_id = await resolve_session_id(ctx.room.name)
+    if db_session_id is None:
+        raise RuntimeError(f"session not found for room {ctx.room.name}")
+
+    prompt_locale = await resolve_prompt_locale(
+        db_sessionmaker,
+        db_session_id,
+        preferred_locale=last_language,
+        default_locale=settings.PROMPT_DEFAULT_LOCALE,
+    )
+    prompt_bundle = await load_prompt_bundle(
+        db_sessionmaker,
+        prompt_locale,
+        default_locale=settings.PROMPT_DEFAULT_LOCALE,
+    )
+    instructions = build_instructions(prompt_bundle.layers)
+    if not instructions.strip():
+        raise RuntimeError("prompt layers are empty")
+
+    mode_voice_guidance = require_prompt_layer(prompt_bundle.layers, "mode_voice_guidance")
+    mode_text_guidance = require_prompt_layer(prompt_bundle.layers, "mode_text_guidance")
+
+    logger.info(
+        "loaded prompt bundle, requested_locale=%s locale_chain=%s matched_layers=%s",
+        prompt_bundle.requested_locale,
+        ",".join(prompt_bundle.locale_chain),
+        len(prompt_bundle.layers),
+    )
+    await save_config_snapshot(db_sessionmaker, db_session_id, prompt_bundle)
 
     @ctx.room.on("participant_disconnected")
     def on_participant_disconnected(disconnected_participant) -> None:
@@ -244,16 +216,8 @@ async def entrypoint(ctx: JobContext) -> None:
 
     agent = TwypeAgent(
         instructions=instructions,
-        mode_voice_guidance=(
-            prompt_bundle.layers.get("mode_voice_guidance", FALLBACK_VOICE_GUIDANCE)
-            if prompt_bundle is not None
-            else FALLBACK_VOICE_GUIDANCE
-        ),
-        mode_text_guidance=(
-            prompt_bundle.layers.get("mode_text_guidance", FALLBACK_TEXT_GUIDANCE)
-            if prompt_bundle is not None
-            else FALLBACK_TEXT_GUIDANCE
-        ),
+        mode_voice_guidance=mode_voice_guidance,
+        mode_text_guidance=mode_text_guidance,
         thinking_sounds_enabled=settings.THINKING_SOUNDS_ENABLED,
         thinking_sounds_delay=settings.THINKING_SOUNDS_DELAY,
         default_language=last_language,
@@ -265,6 +229,20 @@ async def entrypoint(ctx: JobContext) -> None:
             ctx.room,
             text=chunk,
             is_final=False,
+        )
+    )
+    agent.set_structured_response_publisher(
+        lambda result, message_id: publish_structured_response(
+            ctx.room,
+            items=[
+                {
+                    "text": item.text,
+                    "chunk_ids": [str(chunk_id) for chunk_id in item.chunk_ids],
+                }
+                for item in result.text_items
+            ],
+            is_final=True,
+            message_id=message_id,
         )
     )
 
@@ -344,46 +322,82 @@ async def entrypoint(ctx: JobContext) -> None:
     async def handle_assistant_message_event(ev: object) -> None:
         try:
             message = getattr(ev, "item", None)
-            if message is None:
+            role = str(getattr(message, "role", "assistant"))
+            if message is not None and role != "assistant":
                 return
 
-            role = str(getattr(message, "role", ""))
-            if role != "assistant":
-                return
+            if message is not None:
+                text = _extract_chat_message_text(message).strip()
+            else:
+                raw_text = getattr(ev, "transcript", None)
+                if raw_text is None:
+                    raw_text = getattr(ev, "text", "")
+                text = str(raw_text).strip()
 
-            text = _extract_chat_message_text(message).strip()
             if not text:
                 return
 
-            response_mode = agent.mode_context.current_mode
-            message_id = None
+            completed_response = agent.consume_completed_response()
+            response_mode = (
+                completed_response.mode
+                if completed_response is not None
+                else agent.mode_context.current_mode
+            )
+            dual_layer_result = (
+                completed_response.dual_layer_result
+                if completed_response is not None
+                else agent.last_dual_layer_result
+            )
+            response_id = (
+                completed_response.response_id
+                if completed_response is not None
+                else agent.current_response_id
+            )
+            source_ids = (
+                [str(chunk_id) for chunk_id in dual_layer_result.all_chunk_ids]
+                if dual_layer_result is not None and dual_layer_result.all_chunk_ids
+                else None
+            )
+            message_id = str(response_id) if response_id is not None else None
             if db_session_id is not None:
                 inserted_id = await save_agent_response(
                     db_session_id,
                     text,
                     mode=response_mode,
+                    source_ids=source_ids,
+                    message_id=response_id,
                 )
-                if inserted_id is not None:
+                if inserted_id is not None and message_id is None:
                     message_id = str(inserted_id)
 
             if response_mode == "text":
-                await publish_chat_response(
-                    ctx.room,
-                    text=text,
-                    is_final=True,
-                    message_id=message_id,
-                )
+                if dual_layer_result is None or not dual_layer_result.text_items:
+                    await publish_chat_response(
+                        ctx.room,
+                        text=text,
+                        is_final=True,
+                        message_id=message_id,
+                    )
             else:
+                transcript_text = text
+                if dual_layer_result is not None:
+                    if not dual_layer_result.voice_text and dual_layer_result.text_items:
+                        return
+                    if dual_layer_result.voice_text:
+                        transcript_text = dual_layer_result.voice_text
+
                 await publish_transcript(
                     ctx.room,
                     role="assistant",
                     is_final=True,
-                    text=text,
+                    text=transcript_text,
                     language=last_language,
                     message_id=message_id,
                 )
         except Exception:
             logger.exception("failed to handle assistant message event, room=%s", ctx.room.name)
+        finally:
+            agent.clear_current_response_id()
 
     async def handle_error_event(ev: object) -> None:
         try:
@@ -487,8 +501,8 @@ async def entrypoint(ctx: JobContext) -> None:
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
 
-    @session.on("conversation_item_added")
-    def on_conversation_item_added(ev: object) -> None:
+    @session.on("agent_speech_committed")
+    def on_agent_speech_committed(ev: object) -> None:
         task = asyncio.create_task(handle_assistant_message_event(ev))
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)

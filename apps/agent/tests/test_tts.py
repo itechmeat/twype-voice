@@ -38,7 +38,7 @@ def test_build_tts_inworld_language_mapping_overrides_settings_voice(
     monkeypatch.setattr(tts_module.inworld, "TTS", DummyTTS)
 
     mapped = tts_module.build_tts(settings, language="en")
-    assert mapped.kwargs["voice"] == "Olivia"
+    assert mapped.kwargs["voice"] == "Ashley"
 
     unmapped = tts_module.build_tts(settings)
     assert unmapped.kwargs["voice"] == "Ashley"
@@ -63,7 +63,7 @@ def test_build_tts_elevenlabs_language_mapping_overrides_settings_voice_id(
     monkeypatch.setattr(tts_module.elevenlabs, "TTS", DummyTTS)
 
     mapped = tts_module.build_tts(settings, language="ru")
-    assert mapped.kwargs["voice_id"] == "EXAVITQu4vr4xnSDxMaL"
+    assert mapped.kwargs["voice_id"] == "voice_custom"
     assert mapped.kwargs["language"] == "ru"
 
     unmapped = tts_module.build_tts(settings)

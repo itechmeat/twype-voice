@@ -59,23 +59,19 @@ async def save_transcript(
 
     message_model, _session_model = _load_models()
 
-    try:
-        async with _sessionmaker() as session:
-            message = message_model(
-                session_id=session_id,
-                role="user",
-                mode=mode,
-                content=cleaned_text,
-                voice_transcript=cleaned_text if mode == "voice" else None,
-                sentiment_raw=sentiment_raw if mode == "voice" else None,
-            )
-            session.add(message)
-            await session.commit()
-            await session.refresh(message)
-            return message.id
-    except Exception:
-        logger.exception("failed to persist transcript, session_id=%s", session_id)
-        return None
+    async with _sessionmaker() as session:
+        message = message_model(
+            session_id=session_id,
+            role="user",
+            mode=mode,
+            content=cleaned_text,
+            voice_transcript=cleaned_text if mode == "voice" else None,
+            sentiment_raw=sentiment_raw if mode == "voice" else None,
+        )
+        session.add(message)
+        await session.commit()
+        await session.refresh(message)
+        return message.id
 
 
 async def save_agent_response(
@@ -83,6 +79,8 @@ async def save_agent_response(
     text: str,
     *,
     mode: Literal["voice", "text"] = "voice",
+    source_ids: list[str] | None = None,
+    message_id: uuid.UUID | None = None,
 ) -> uuid.UUID | None:
     cleaned_text = text.strip()
     if not cleaned_text:
@@ -93,20 +91,18 @@ async def save_agent_response(
 
     message_model, _session_model = _load_models()
 
-    try:
-        async with _sessionmaker() as session:
-            message = message_model(
-                session_id=session_id,
-                role="assistant",
-                mode=mode,
-                content=cleaned_text,
-                voice_transcript=cleaned_text if mode == "voice" else None,
-                sentiment_raw=None,
-            )
-            session.add(message)
-            await session.commit()
-            await session.refresh(message)
-            return message.id
-    except Exception:
-        logger.exception("failed to persist agent response, session_id=%s", session_id)
-        return None
+    async with _sessionmaker() as session:
+        message = message_model(
+            id=message_id or uuid.uuid4(),
+            session_id=session_id,
+            role="assistant",
+            mode=mode,
+            content=cleaned_text,
+            voice_transcript=cleaned_text if mode == "voice" else None,
+            sentiment_raw=None,
+            source_ids=source_ids or None,
+        )
+        session.add(message)
+        await session.commit()
+        await session.refresh(message)
+        return message.id

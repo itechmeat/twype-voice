@@ -9,6 +9,8 @@ model_list:
       api_key: os.environ/OPENAI_API_KEY
 
 router_settings:
+  # INFO: This cross-model fallback is intentional and should not be removed unless an
+  # equivalent or better resilience strategy replaces it.
   fallbacks:
     - gemini-flash-lite:
         - gpt-4.1-mini
