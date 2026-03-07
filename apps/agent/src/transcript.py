@@ -104,4 +104,5 @@ async def save_agent_response(
         )
         session.add(message)
         await session.commit()
+        await session.refresh(message)
         return message.id

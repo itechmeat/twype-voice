@@ -100,6 +100,7 @@ class TestResolveChunksService:
 
         items = await resolve_chunks([missing_id, chunks[1].id, chunks[0].id], session)
 
+        # Found IDs keep their original input order after missing IDs are filtered out.
         assert [item.chunk_id for item in items] == [chunks[1].id, chunks[0].id]
 
 

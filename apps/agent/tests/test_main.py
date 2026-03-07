@@ -5,6 +5,7 @@ import json
 from types import SimpleNamespace
 from uuid import uuid4
 
+import agent as agent_module
 import main as main_module
 import pytest
 from dual_layer_parser import DualLayerResult, TextItem
@@ -191,8 +192,9 @@ async def test_entrypoint_starts_agent_with_db_instructions(
         def __init__(self, **kwargs: object) -> None:
             captured_agent_kwargs.update(kwargs)
             self.mode_context = FakeModeContext()
-            self._last_dual_layer_result = None
-            self._current_response_id = uuid4()
+            self.last_dual_layer_result = None
+            self.current_response_id = None
+            self.completed_response = None
 
         def set_chat_response_publisher(self, publisher) -> None:
             self._chat_response_publisher = publisher
@@ -200,8 +202,11 @@ async def test_entrypoint_starts_agent_with_db_instructions(
         def set_structured_response_publisher(self, publisher) -> None:
             self._structured_response_publisher = publisher
 
+        def consume_completed_response(self):
+            return self.completed_response
+
         def clear_current_response_id(self) -> None:
-            self._current_response_id = None
+            self.current_response_id = None
 
     monkeypatch.setattr(main_module, "save_config_snapshot", fake_save_config_snapshot)
     monkeypatch.setattr(main_module, "TwypeAgent", FakeTwypeAgent)
@@ -578,7 +583,8 @@ async def test_entrypoint_structured_response_uses_pre_generated_response_id(
             voice_text="Short answer",
             text_items=[TextItem(text="Detail", chunk_ids=[])],
             all_chunk_ids=[],
-        )
+        ),
+        str(response_id),
     )
 
     assert published_structured_responses == [
@@ -589,6 +595,98 @@ async def test_entrypoint_structured_response_uses_pre_generated_response_id(
             "message_id": str(response_id),
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_entrypoint_uses_completed_response_snapshot_for_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    saved_assistant_messages: list[dict[str, object]] = []
+    published_chat_responses: list[dict[str, object]] = []
+    resolved_session_id = uuid4()
+    first_response_id = uuid4()
+    second_response_id = uuid4()
+    source_chunk_id = uuid4()
+
+    monkeypatch.setattr(main_module, "_settings", AgentSettings())
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        _ = room_name
+        return resolved_session_id
+
+    async def fake_save_agent_response(
+        session_id,
+        text,
+        *,
+        mode="voice",
+        source_ids=None,
+        message_id=None,
+    ):
+        saved_assistant_messages.append(
+            {
+                "session_id": session_id,
+                "text": text,
+                "mode": mode,
+                "source_ids": source_ids,
+                "message_id": message_id,
+            }
+        )
+        return message_id
+
+    async def fake_publish_chat_response(room, *, text, is_final, message_id=None) -> None:
+        published_chat_responses.append(
+            {
+                "room": room,
+                "text": text,
+                "is_final": is_final,
+                "message_id": message_id,
+            }
+        )
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+    monkeypatch.setattr(main_module, "save_agent_response", fake_save_agent_response)
+    monkeypatch.setattr(main_module, "publish_chat_response", fake_publish_chat_response)
+
+    await main_module.entrypoint(ctx)
+
+    started_agent = session.started_with["agent"]
+    started_agent.mode_context.switch_to("text")
+    started_agent._current_response_id = second_response_id
+    started_agent._last_dual_layer_result = DualLayerResult(
+        voice_text="Second answer",
+        text_items=[],
+        all_chunk_ids=[],
+    )
+    started_agent._completed_responses.append(
+        agent_module.CompletedResponse(
+            response_id=first_response_id,
+            mode="text",
+            dual_layer_result=DualLayerResult(
+                voice_text="First answer",
+                text_items=[TextItem(text="Detail", chunk_ids=[source_chunk_id])],
+                all_chunk_ids=[source_chunk_id],
+            ),
+        )
+    )
+
+    session.handlers["agent_speech_committed"](SimpleNamespace(text="First answer"))
+    await asyncio.sleep(0)
+
+    assert saved_assistant_messages == [
+        {
+            "session_id": resolved_session_id,
+            "text": "First answer",
+            "mode": "text",
+            "source_ids": [str(source_chunk_id)],
+            "message_id": first_response_id,
+        }
+    ]
+    assert published_chat_responses == []
 
 
 @pytest.mark.asyncio

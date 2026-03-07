@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
+from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -25,6 +26,13 @@ logger = logging.getLogger("twype-agent")
 _DEFAULT_FILLER_PHRASE = "Hmm…"
 MODE_ANNOTATION_HISTORY_COUNT = 6
 ModeName = Literal["voice", "text"]
+
+
+@dataclass(slots=True, frozen=True)
+class CompletedResponse:
+    response_id: uuid.UUID | None
+    mode: ModeName
+    dual_layer_result: DualLayerResult
 
 
 @dataclass(slots=True)
@@ -167,6 +175,7 @@ class TwypeAgent(Agent):
         self._last_rag_chunks: list[RagChunk] = []
         self._last_dual_layer_result: DualLayerResult | None = None
         self._current_response_id: uuid.UUID | None = None
+        self._completed_responses: deque[CompletedResponse] = deque()
 
     @property
     def text_mode_active(self) -> bool:
@@ -180,6 +189,11 @@ class TwypeAgent(Agent):
     def current_response_id(self) -> uuid.UUID | None:
         return self._current_response_id
 
+    def consume_completed_response(self) -> CompletedResponse | None:
+        if not self._completed_responses:
+            return None
+        return self._completed_responses.popleft()
+
     def set_chat_response_publisher(
         self,
         publisher: Callable[[str], Awaitable[None]] | None,
@@ -188,7 +202,7 @@ class TwypeAgent(Agent):
 
     def set_structured_response_publisher(
         self,
-        publisher: Callable[[DualLayerResult], Awaitable[None]] | None,
+        publisher: Callable[[DualLayerResult, str | None], Awaitable[None]] | None,
     ) -> None:
         self._structured_response_publisher = publisher
 
@@ -433,10 +447,15 @@ class TwypeAgent(Agent):
             pass
 
         dual_layer_result = await parser.result()
-        self._last_dual_layer_result = dual_layer_result
+        completed_response = self._record_completed_response(dual_layer_result)
 
         if dual_layer_result.text_items and self._structured_response_publisher is not None:
-            await self._structured_response_publisher(dual_layer_result)
+            message_id = (
+                str(completed_response.response_id)
+                if completed_response.response_id is not None
+                else None
+            )
+            await self._structured_response_publisher(dual_layer_result, message_id)
             return None
 
         if self._chat_response_publisher is not None and dual_layer_result.voice_text:
@@ -459,14 +478,29 @@ class TwypeAgent(Agent):
 
     async def _finalize_dual_layer_result(self, parser: DualLayerStreamParser) -> None:
         dual_layer_result = await parser.result()
-        self._last_dual_layer_result = dual_layer_result
+        completed_response = self._record_completed_response(dual_layer_result)
         if dual_layer_result.text_items and self._structured_response_publisher is not None:
-            await self._structured_response_publisher(dual_layer_result)
+            message_id = (
+                str(completed_response.response_id)
+                if completed_response.response_id is not None
+                else None
+            )
+            await self._structured_response_publisher(dual_layer_result, message_id)
 
     async def _close_async_iterable(self, stream: AsyncIterator[str]) -> None:
         aclose = getattr(stream, "aclose", None)
         if callable(aclose):
             await aclose()
+
+    def _record_completed_response(self, dual_layer_result: DualLayerResult) -> CompletedResponse:
+        self._last_dual_layer_result = dual_layer_result
+        completed_response = CompletedResponse(
+            response_id=self._current_response_id,
+            mode=self.mode_context.current_mode,
+            dual_layer_result=dual_layer_result,
+        )
+        self._completed_responses.append(completed_response)
+        return completed_response
 
     def clear_current_response_id(self) -> None:
         self._current_response_id = None

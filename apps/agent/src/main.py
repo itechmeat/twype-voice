@@ -232,7 +232,7 @@ async def entrypoint(ctx: JobContext) -> None:
         )
     )
     agent.set_structured_response_publisher(
-        lambda result: publish_structured_response(
+        lambda result, message_id: publish_structured_response(
             ctx.room,
             items=[
                 {
@@ -242,9 +242,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 for item in result.text_items
             ],
             is_final=True,
-            message_id=(
-                str(agent.current_response_id) if agent.current_response_id is not None else None
-            ),
+            message_id=message_id,
         )
     )
 
@@ -339,9 +337,22 @@ async def entrypoint(ctx: JobContext) -> None:
             if not text:
                 return
 
-            response_mode = agent.mode_context.current_mode
-            dual_layer_result = agent.last_dual_layer_result
-            response_id = agent.current_response_id
+            completed_response = agent.consume_completed_response()
+            response_mode = (
+                completed_response.mode
+                if completed_response is not None
+                else agent.mode_context.current_mode
+            )
+            dual_layer_result = (
+                completed_response.dual_layer_result
+                if completed_response is not None
+                else agent.last_dual_layer_result
+            )
+            response_id = (
+                completed_response.response_id
+                if completed_response is not None
+                else agent.current_response_id
+            )
             source_ids = (
                 [str(chunk_id) for chunk_id in dual_layer_result.all_chunk_ids]
                 if dual_layer_result is not None and dual_layer_result.all_chunk_ids
