@@ -9,6 +9,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "agent.response_service_unavailable": (
             "Sorry, the response service is temporarily unavailable. Please try again."
         ),
+        "auth.invalid_authentication_credentials": "Invalid authentication credentials",
         "auth.email_already_registered": "Email already registered",
         "auth.user_not_found": "User not found",
         "auth.invalid_credentials": "Invalid credentials",
@@ -24,6 +25,7 @@ _CATALOG: dict[str, dict[str, str]] = {
             "<p>Your verification code: <strong>{code}</strong></p>"
             "<p>The code is valid for {ttl_minutes} minutes.</p>"
         ),
+        "sessions.session_not_found": "Session not found",
     }
 }
 

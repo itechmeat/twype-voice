@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -24,7 +25,7 @@ from src.database import session_scope
 from src.knowledge_ingestion import EmbeddingClient, EmbeddingInput, EmbeddingSettings
 from src.knowledge_ingestion.loader import DatabaseLoader, PreparedSource
 from src.knowledge_ingestion.types import EmbeddedChunk, ManifestSource
-from src.models import AgentConfig, TTSConfig, User
+from src.models import AgentConfig, CrisisContact, TTSConfig, User
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,191 @@ SAMPLE_KNOWLEDGE_CHUNKS: list[dict[str, str | int | None]] = [
     },
 ]
 
+CRISIS_CONTACTS: list[dict[str, str | int | bool | UUID | None]] = [
+    {
+        "id": UUID("10000000-0000-0000-0000-000000000001"),
+        "language": "en",
+        "locale": "US",
+        "contact_type": "emergency_services",
+        "name": "Emergency Services",
+        "phone": "911",
+        "url": None,
+        "description": "Call emergency services immediately if there is an immediate risk of harm.",
+        "priority": 1,
+        "is_active": True,
+    },
+    {
+        "id": UUID("10000000-0000-0000-0000-000000000002"),
+        "language": "en",
+        "locale": "US",
+        "contact_type": "suicide_hotline",
+        "name": "988 Suicide & Crisis Lifeline",
+        "phone": "988",
+        "url": "https://988lifeline.org/",
+        "description": "Call or text 988 for immediate crisis support in the United States.",
+        "priority": 2,
+        "is_active": True,
+    },
+    {
+        "id": UUID("10000000-0000-0000-0000-000000000003"),
+        "language": "en",
+        "locale": "US",
+        "contact_type": "crisis_helpline",
+        "name": "Crisis Text Line",
+        "phone": "741741",
+        "url": "https://www.crisistextline.org/",
+        "description": "Text HOME to 741741 to connect with a trained crisis counselor.",
+        "priority": 3,
+        "is_active": True,
+    },
+    {
+        "id": UUID("20000000-0000-0000-0000-000000000001"),
+        "language": "ru",
+        "locale": "RU",
+        "contact_type": "emergency_services",
+        "name": "Emergency Services",
+        "phone": "112",
+        "url": None,
+        "description": (
+            "Call emergency services immediately if there is an immediate threat to life."
+        ),
+        "priority": 1,
+        "is_active": True,
+    },
+    {
+        "id": UUID("20000000-0000-0000-0000-000000000002"),
+        "language": "ru",
+        "locale": "RU",
+        "contact_type": "crisis_helpline",
+        "name": "Children and Family Crisis Helpline",
+        "phone": "8-800-2000-122",
+        "url": "https://telefon-doveria.ru/",
+        "description": "National crisis helpline offering urgent emotional support in Russian.",
+        "priority": 2,
+        "is_active": True,
+    },
+    {
+        "id": UUID("20000000-0000-0000-0000-000000000003"),
+        "language": "ru",
+        "locale": "RU",
+        "contact_type": "suicide_hotline",
+        "name": "Moscow Suicide Prevention Service",
+        "phone": "8-495-625-31-01",
+        "url": None,
+        "description": "Crisis and suicide prevention phone line available in Russian.",
+        "priority": 3,
+        "is_active": True,
+    },
+]
+
+CRISIS_KEYWORD_PATTERNS: dict[str, dict[str, list[dict[str, str | bool]]]] = {
+    "en": {
+        "suicide": [
+            {"pattern": "kill myself", "regex": False},
+            {"pattern": "want to die", "regex": False},
+            {"pattern": r"\bend my life\b", "regex": True},
+        ],
+        "self_harm": [
+            {"pattern": "cut myself", "regex": False},
+            {"pattern": "overdose", "regex": False},
+            {"pattern": r"\bhurt myself\b", "regex": True},
+        ],
+        "acute_symptoms": [
+            {"pattern": "hearing voices", "regex": False},
+            {"pattern": "can't tell what is real", "regex": False},
+            {"pattern": r"\bpanic attack\b", "regex": True},
+        ],
+        "violence": [
+            {"pattern": "want to hurt someone", "regex": False},
+            {"pattern": "going to kill him", "regex": False},
+            {"pattern": r"\bviolent thoughts\b", "regex": True},
+        ],
+    },
+    "ru": {
+        "suicide": [
+            {
+                "pattern": ("\u0445\u043e\u0447\u0443 \u0443\u043c\u0435\u0440\u0435\u0442\u044c"),
+                "regex": False,
+            },
+            {
+                "pattern": (
+                    "\u043f\u043e\u043a\u043e\u043d\u0447\u0438\u0442\u044c "
+                    "\u0441 \u0441\u043e\u0431\u043e\u0439"
+                ),
+                "regex": False,
+            },
+            {
+                "pattern": ("\\b\u0443\u0431\u0438\u0442\u044c \u0441\u0435\u0431\u044f\\b"),
+                "regex": True,
+            },
+        ],
+        "self_harm": [
+            {
+                "pattern": (
+                    "\u043f\u043e\u0440\u0435\u0437\u0430\u0442\u044c \u0441\u0435\u0431\u044f"
+                ),
+                "regex": False,
+            },
+            {
+                "pattern": (
+                    "\u043f\u0435\u0440\u0435\u0434\u043e\u0437\u0438\u0440\u043e\u0432\u043a\u0430"
+                ),
+                "regex": False,
+            },
+            {
+                "pattern": (
+                    "\\b\u043d\u0430\u0432\u0440\u0435\u0434\u0438\u0442\u044c "
+                    "\u0441\u0435\u0431\u0435\\b"
+                ),
+                "regex": True,
+            },
+        ],
+        "acute_symptoms": [
+            {
+                "pattern": ("\u0441\u043b\u044b\u0448\u0443 \u0433\u043e\u043b\u043e\u0441\u0430"),
+                "regex": False,
+            },
+            {
+                "pattern": (
+                    "\u043d\u0435 \u043f\u043e\u043d\u0438\u043c\u0430\u044e "
+                    "\u0447\u0442\u043e \u0440\u0435\u0430\u043b\u044c\u043d\u043e"
+                ),
+                "regex": False,
+            },
+            {
+                "pattern": (
+                    "\\b\u0441\u0438\u043b\u044c\u043d\u0430\u044f "
+                    "\u043f\u0430\u043d\u0438\u043a\u0430\\b"
+                ),
+                "regex": True,
+            },
+        ],
+        "violence": [
+            {
+                "pattern": (
+                    "\u0445\u043e\u0447\u0443 \u043a\u043e\u0433\u043e-\u0442\u043e "
+                    "\u0443\u0431\u0438\u0442\u044c"
+                ),
+                "regex": False,
+            },
+            {
+                "pattern": (
+                    "\u043c\u043e\u0433\u0443 \u0443\u0434\u0430\u0440\u0438\u0442\u044c "
+                    "\u0435\u0433\u043e"
+                ),
+                "regex": False,
+            },
+            {
+                "pattern": (
+                    "\\b\u043f\u0440\u0438\u0447\u0438\u043d\u0438\u0442\u044c "
+                    "\u0432\u0440\u0435\u0434 \u0434\u0440\u0443\u0433\u0438\u043c\\b"
+                ),
+                "regex": True,
+            },
+        ],
+    },
+}
+
 
 class EmbeddingClientProtocol(Protocol):
     async def embed_inputs(self, inputs: list[EmbeddingInput]) -> list[list[float]]: ...
@@ -243,6 +429,49 @@ async def seed_agent_config() -> None:
                     },
                 )
                 await session.execute(stmt)
+
+
+async def seed_crisis_contacts() -> None:
+    async with session_scope() as session:
+        for contact in CRISIS_CONTACTS:
+            stmt = insert(CrisisContact).values(**contact)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[CrisisContact.id],
+                set_={
+                    "language": stmt.excluded.language,
+                    "locale": stmt.excluded.locale,
+                    "contact_type": stmt.excluded.contact_type,
+                    "name": stmt.excluded.name,
+                    "phone": stmt.excluded.phone,
+                    "url": stmt.excluded.url,
+                    "description": stmt.excluded.description,
+                    "priority": stmt.excluded.priority,
+                    "is_active": stmt.excluded.is_active,
+                    "updated_at": sa.text("now()"),
+                },
+            )
+            await session.execute(stmt)
+
+
+async def seed_crisis_keywords() -> None:
+    async with session_scope() as session:
+        for language, payload in CRISIS_KEYWORD_PATTERNS.items():
+            stmt = insert(AgentConfig).values(
+                key=f"crisis_keywords_{language}",
+                locale=language,
+                value=json.dumps(payload, ensure_ascii=False),
+                version=1,
+                is_active=True,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[AgentConfig.key, AgentConfig.locale],
+                set_={
+                    "value": stmt.excluded.value,
+                    "is_active": stmt.excluded.is_active,
+                    "updated_at": sa.text("now()"),
+                },
+            )
+            await session.execute(stmt)
 
 
 async def seed_tts_config() -> None:
@@ -326,6 +555,8 @@ async def main() -> None:
     else:
         logger.info("Skipping test user seed; set TWYPE_SEED_INCLUDE_TEST_USER=true to enable it")
     await seed_agent_config()
+    await seed_crisis_contacts()
+    await seed_crisis_keywords()
     await seed_tts_config()
     await seed_knowledge_data()
     logger.info("Seed complete")

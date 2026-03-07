@@ -64,6 +64,7 @@ class AgentSettings(BaseSettings):
     RAG_TOP_K: int = Field(default=5, ge=1, le=10)
     RAG_LANGUAGE_BOOST: float = Field(default=1.5, ge=1.0, le=5.0)
     RAG_EMBEDDING_TIMEOUT: float = Field(default=3.0, gt=0.0)
+    CRISIS_ENABLED: bool = True
 
     EMOTION_LLM_MODEL: str | None = None
 

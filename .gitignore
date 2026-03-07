@@ -22,6 +22,7 @@ node_modules/
 
 # Vite / Frontend build
 apps/web/dist/
+*.tsbuildinfo
 
 
 # IDE

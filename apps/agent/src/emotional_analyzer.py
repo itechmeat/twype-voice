@@ -137,6 +137,18 @@ class EmotionalTrendTracker:
     def snapshots(self) -> list[EmotionalSnapshot]:
         return list(self._window)
 
+    @property
+    def high_distress(self) -> bool:
+        if len(self._window) < 3:
+            return False
+
+        valence_trend, _arousal_trend = self.get_trends()
+        if valence_trend != "falling":
+            return False
+
+        recent = list(self._window)[-3:]
+        return all(classify_quadrant(item.valence, item.arousal) == "distress" for item in recent)
+
     def add_snapshot(self, valence: float, arousal: float) -> None:
         self._window.append(EmotionalSnapshot(valence=valence, arousal=arousal))
 

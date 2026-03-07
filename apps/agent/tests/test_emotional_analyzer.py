@@ -135,3 +135,30 @@ class TestEmotionalTrendTracker:
         v_trend, a_trend = tracker.get_trends()
         assert v_trend == "stable"
         assert a_trend == "stable"
+
+    def test_high_distress_activates_for_three_distress_snapshots_with_falling_valence(
+        self,
+    ) -> None:
+        tracker = EmotionalTrendTracker(trend_threshold=0.05)
+        tracker.add_snapshot(-0.2, 0.4)
+        tracker.add_snapshot(-0.45, 0.5)
+        tracker.add_snapshot(-0.7, 0.6)
+
+        assert tracker.high_distress is True
+
+    def test_high_distress_deactivates_when_latest_snapshot_is_not_distress(self) -> None:
+        tracker = EmotionalTrendTracker(trend_threshold=0.05)
+        tracker.add_snapshot(-0.2, 0.4)
+        tracker.add_snapshot(-0.45, 0.5)
+        tracker.add_snapshot(-0.7, 0.6)
+        tracker.add_snapshot(0.2, 0.2)
+
+        assert tracker.high_distress is False
+
+    def test_high_distress_requires_falling_valence_trend(self) -> None:
+        tracker = EmotionalTrendTracker(trend_threshold=0.05)
+        tracker.add_snapshot(-0.7, 0.6)
+        tracker.add_snapshot(-0.6, 0.7)
+        tracker.add_snapshot(-0.5, 0.8)
+
+        assert tracker.high_distress is False

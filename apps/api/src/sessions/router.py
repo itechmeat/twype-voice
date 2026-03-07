@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user, get_session
+from src.localization import resolve_request_locale, translate
 from src.models.user import User
 from src.schemas.sessions import (
     MessageItem,
@@ -73,15 +74,18 @@ async def list_sessions(
 @router.get("/{session_id}/messages", response_model=list[MessageItem])
 async def list_messages(
     session_id: uuid.UUID,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> list[MessageItem]:
+    locale = resolve_request_locale(request.headers.get("Accept-Language"))
+
     try:
         messages = await get_session_messages(session_id=session_id, user_id=user.id, db=db)
     except SessionNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
+            detail=translate("sessions.session_not_found", locale=locale),
         ) from exc
 
     return [

@@ -84,9 +84,17 @@ class FakeSpeechHandle:
         *,
         modality: str,
         on_await: object | None = None,
+        interrupted: bool = False,
     ) -> None:
         self.input_details = SimpleNamespace(modality=modality)
         self._on_await = on_await
+        self.interrupted = interrupted
+        self.allow_interruptions = True
+
+    def interrupt(self, *, force: bool = False):
+        _ = force
+        self.interrupted = True
+        return self
 
     def __await__(self):
         async def _wait():
@@ -201,12 +209,16 @@ async def test_entrypoint_starts_agent_with_db_instructions(
             self.last_dual_layer_result = None
             self.current_response_id = None
             self.completed_response = None
+            self.crisis_detector = None
 
         def set_chat_response_publisher(self, publisher) -> None:
             self._chat_response_publisher = publisher
 
         def set_structured_response_publisher(self, publisher) -> None:
             self._structured_response_publisher = publisher
+
+        def set_crisis_alert_publisher(self, publisher) -> None:
+            self._crisis_alert_publisher = publisher
 
         def consume_completed_response(self):
             return self.completed_response
@@ -865,6 +877,400 @@ async def test_entrypoint_publishes_refined_emotional_state_for_same_message(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("livekit_required_env")
+async def test_entrypoint_valid_interruption_publishes_started_and_resolved_events(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    published_events: list[dict[str, object]] = []
+    caplog.set_level("DEBUG", logger="twype-agent")
+
+    monkeypatch.setattr(main_module, "_settings", AgentSettings())
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        _ = room_name
+        return uuid4()
+
+    async def fake_save_transcript(session_id, text, sentiment_raw, *, mode="voice", **kwargs):
+        _ = (session_id, text, sentiment_raw, mode, kwargs)
+        return uuid4()
+
+    async def fake_publish_transcript(room, **kwargs) -> None:
+        _ = (room, kwargs)
+
+    async def fake_publish_emotional_state(room, **kwargs) -> None:
+        _ = (room, kwargs)
+
+    async def fake_publish_interruption_started(room) -> None:
+        published_events.append({"type": "interruption_started", "room": room})
+
+    async def fake_publish_interruption_resolved(room, *, resumed: bool) -> None:
+        published_events.append(
+            {
+                "type": "interruption_resolved",
+                "room": room,
+                "resumed": resumed,
+            }
+        )
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+    monkeypatch.setattr(main_module, "save_transcript", fake_save_transcript)
+    monkeypatch.setattr(main_module, "publish_transcript", fake_publish_transcript)
+    monkeypatch.setattr(main_module, "publish_emotional_state", fake_publish_emotional_state)
+    monkeypatch.setattr(
+        main_module,
+        "publish_interruption_started",
+        fake_publish_interruption_started,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "publish_interruption_resolved",
+        fake_publish_interruption_resolved,
+    )
+
+    await main_module.entrypoint(ctx)
+
+    started_agent = session.started_with["agent"]
+    interruption_snapshots: list[tuple[str, int]] = []
+
+    def fake_remember_interrupted_response() -> tuple[str, int]:
+        snapshot = ("Partial reply", 4)
+        interruption_snapshots.append(snapshot)
+        return snapshot
+
+    started_agent.remember_interrupted_response = fake_remember_interrupted_response
+    session.current_speech = FakeSpeechHandle(modality="audio", interrupted=True)
+
+    session.handlers["user_input_transcribed"](
+        SimpleNamespace(
+            transcript="Wait",
+            is_final=True,
+            language="en",
+        )
+    )
+    await asyncio.sleep(0)
+
+    assert interruption_snapshots == [("Partial reply", 4)]
+    assert published_events == [
+        {"type": "interruption_started", "room": ctx.room},
+        {
+            "type": "interruption_resolved",
+            "room": ctx.room,
+            "resumed": False,
+        },
+    ]
+    assert any(
+        "interruption event" in record.message
+        and "event_type=interruption_started" in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "llm generation cancelled" in record.message and "generated_tokens=4" in record.message
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_entrypoint_false_interruption_resumed_publishes_event_without_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    published_events: list[dict[str, object]] = []
+
+    monkeypatch.setattr(main_module, "_settings", AgentSettings())
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        _ = room_name
+        return uuid4()
+
+    async def fake_publish_interruption_false(room, *, resumed: bool) -> None:
+        published_events.append(
+            {
+                "type": "interruption_false",
+                "room": room,
+                "resumed": resumed,
+            }
+        )
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+    monkeypatch.setattr(
+        main_module,
+        "publish_interruption_false",
+        fake_publish_interruption_false,
+    )
+
+    await main_module.entrypoint(ctx)
+
+    session.handlers["agent_false_interruption"](SimpleNamespace(resumed=True))
+    await asyncio.sleep(0)
+
+    assert session.generate_reply_calls == []
+    assert published_events == [
+        {
+            "type": "interruption_false",
+            "room": ctx.room,
+            "resumed": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_entrypoint_false_interruption_generates_continuation_when_resume_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    published_events: list[dict[str, object]] = []
+
+    monkeypatch.setattr(main_module, "_settings", AgentSettings())
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        _ = room_name
+        return uuid4()
+
+    async def fake_publish_interruption_false(room, *, resumed: bool) -> None:
+        published_events.append(
+            {
+                "type": "interruption_false",
+                "room": room,
+                "resumed": resumed,
+            }
+        )
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+    monkeypatch.setattr(
+        main_module,
+        "publish_interruption_false",
+        fake_publish_interruption_false,
+    )
+
+    await main_module.entrypoint(ctx)
+
+    started_agent = session.started_with["agent"]
+    started_agent.consume_interrupted_response = lambda: "The response stopped here."
+    session.current_speech = FakeSpeechHandle(modality="audio")
+
+    session.handlers["agent_false_interruption"](SimpleNamespace(resumed=False))
+    await asyncio.sleep(0)
+
+    assert published_events == [
+        {
+            "type": "interruption_false",
+            "room": ctx.room,
+            "resumed": False,
+        }
+    ]
+    assert len(session.generate_reply_calls) == 1
+    assert (
+        "The response stopped here."
+        in session.generate_reply_calls[0]["instructions"]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_short_noise_does_not_publish_interruption_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    published_events: list[str] = []
+
+    monkeypatch.setattr(main_module, "_settings", AgentSettings())
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        _ = room_name
+        return uuid4()
+
+    async def fake_publish_interruption_started(room) -> None:
+        _ = room
+        published_events.append("interruption_started")
+
+    async def fake_publish_interruption_resolved(room, *, resumed: bool) -> None:
+        _ = (room, resumed)
+        published_events.append("interruption_resolved")
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+    monkeypatch.setattr(
+        main_module,
+        "publish_interruption_started",
+        fake_publish_interruption_started,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "publish_interruption_resolved",
+        fake_publish_interruption_resolved,
+    )
+
+    await main_module.entrypoint(ctx)
+
+    # Smoke test only: MIN_INTERRUPTION_DURATION filtering is enforced inside LiveKit SDK,
+    # so this verifies that user_state_changed alone does not publish interruption events.
+    session.handlers["user_state_changed"](
+        SimpleNamespace(new_state="speaking")
+    )
+    session.handlers["user_state_changed"](
+        SimpleNamespace(new_state="listening")
+    )
+    await asyncio.sleep(0)
+
+    assert published_events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_false_interruption_continuation_logs_warning_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    caplog.set_level("WARNING", logger="twype-agent")
+
+    monkeypatch.setattr(main_module, "_settings", AgentSettings())
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        _ = room_name
+        return uuid4()
+
+    class HangingSpeechHandle:
+        def __await__(self):
+            return asyncio.sleep(60).__await__()
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+    monkeypatch.setattr(main_module, "_FALSE_INTERRUPTION_CONTINUATION_TIMEOUT", 0.01)
+    monkeypatch.setattr(
+        main_module,
+        "publish_interruption_false",
+        lambda room, *, resumed: asyncio.sleep(0),
+    )
+
+    await main_module.entrypoint(ctx)
+
+    started_agent = session.started_with["agent"]
+    started_agent.consume_interrupted_response = lambda: "Timeout case"
+    session.current_speech = HangingSpeechHandle()
+
+    original_generate_reply = session.generate_reply
+
+    def hanging_generate_reply(**kwargs: object):
+        original_generate_reply(**kwargs)
+        return HangingSpeechHandle()
+
+    session.generate_reply = hanging_generate_reply
+
+    session.handlers["agent_false_interruption"](SimpleNamespace(resumed=False))
+    await asyncio.sleep(0.05)
+
+    assert any(
+        "false interruption continuation timed out" in record.message
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_entrypoint_interruption_cycle_processes_new_input_and_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    published_events: list[str] = []
+    published_transcripts: list[dict[str, object]] = []
+
+    monkeypatch.setattr(main_module, "_settings", AgentSettings())
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        _ = room_name
+        return uuid4()
+
+    async def fake_save_transcript(session_id, text, sentiment_raw, *, mode="voice", **kwargs):
+        _ = (session_id, text, sentiment_raw, mode, kwargs)
+        return uuid4()
+
+    async def fake_save_agent_response(session_id, text, *, mode="voice", **kwargs):
+        _ = (session_id, text, mode, kwargs)
+        return uuid4()
+
+    async def fake_publish_transcript(room, **kwargs) -> None:
+        published_transcripts.append({"room": room, **kwargs})
+
+    async def fake_publish_emotional_state(room, **kwargs) -> None:
+        _ = (room, kwargs)
+
+    async def fake_publish_interruption_started(room) -> None:
+        _ = room
+        published_events.append("interruption_started")
+
+    async def fake_publish_interruption_resolved(room, *, resumed: bool) -> None:
+        _ = room
+        published_events.append(f"interruption_resolved:{resumed}")
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+    monkeypatch.setattr(main_module, "save_transcript", fake_save_transcript)
+    monkeypatch.setattr(main_module, "save_agent_response", fake_save_agent_response)
+    monkeypatch.setattr(main_module, "publish_transcript", fake_publish_transcript)
+    monkeypatch.setattr(main_module, "publish_emotional_state", fake_publish_emotional_state)
+    monkeypatch.setattr(
+        main_module,
+        "publish_interruption_started",
+        fake_publish_interruption_started,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "publish_interruption_resolved",
+        fake_publish_interruption_resolved,
+    )
+
+    await main_module.entrypoint(ctx)
+
+    started_agent = session.started_with["agent"]
+    started_agent.remember_interrupted_response = lambda: ("Partial", 2)
+    session.current_speech = FakeSpeechHandle(modality="audio", interrupted=True)
+
+    session.handlers["user_input_transcribed"](
+        SimpleNamespace(
+            transcript="New input",
+            is_final=True,
+            language="en",
+        )
+    )
+    await asyncio.sleep(0)
+
+    session.handlers["agent_speech_committed"](
+        SimpleNamespace(
+            text="Updated reply",
+        )
+    )
+    await asyncio.sleep(0)
+
+    assert published_events == [
+        "interruption_started",
+        "interruption_resolved:False",
+    ]
+    assert [item["role"] for item in published_transcripts] == ["user", "assistant"]
+    assert published_transcripts[0]["text"] == "New input"
+    assert published_transcripts[1]["text"] == "Updated reply"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
 async def test_silence_timer_fires_short_callback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -956,6 +1362,45 @@ async def test_silence_timer_resets_on_transcript(
     await asyncio.sleep(0.06)
 
     assert len(published_nudges) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("livekit_required_env")
+async def test_false_interruption_resets_silence_timer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = FakeContext()
+    session = FakeSession()
+    published_nudges: list[dict[str, object]] = []
+
+    settings = AgentSettings()
+    object.__setattr__(settings, "PROACTIVE_ENABLED", True)
+    object.__setattr__(settings, "PROACTIVE_SHORT_TIMEOUT", 0.08)
+    object.__setattr__(settings, "PROACTIVE_LONG_TIMEOUT", 0.2)
+    monkeypatch.setattr(main_module, "_settings", settings)
+    monkeypatch.setattr(main_module, "build_session", lambda *args, **kwargs: session)
+    _patch_prompt_loading(monkeypatch)
+
+    async def fake_resolve_session_id(room_name: str):
+        _ = room_name
+        return uuid4()
+
+    async def fake_publish_proactive_nudge(room, *, proactive_type, message_id=None) -> None:
+        _ = (room, message_id)
+        published_nudges.append({"proactive_type": proactive_type})
+
+    monkeypatch.setattr(main_module, "resolve_session_id", fake_resolve_session_id)
+    monkeypatch.setattr(main_module, "publish_proactive_nudge", fake_publish_proactive_nudge)
+
+    await main_module.entrypoint(ctx)
+
+    session.handlers["agent_speech_committed"](SimpleNamespace(text="Hello"))
+    await asyncio.sleep(0.04)
+
+    session.handlers["agent_false_interruption"](SimpleNamespace(resumed=True))
+    await asyncio.sleep(0.06)
+
+    assert published_nudges == []
 
 
 @pytest.mark.asyncio

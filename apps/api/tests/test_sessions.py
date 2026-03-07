@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from src.localization import translate
 from src.models.message import Message
 from src.models.session import Session
 
@@ -170,5 +171,10 @@ class TestSessionMessages:
         session.add(s)
         await session.commit()
 
-        resp = await client.get(f"/sessions/{s.id}/messages", headers=auth_headers(attacker.id))
+        headers = {
+            **auth_headers(attacker.id),
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        resp = await client.get(f"/sessions/{s.id}/messages", headers=headers)
         assert resp.status_code == 404
+        assert resp.json()["detail"] == translate("sessions.session_not_found", locale="en-US")

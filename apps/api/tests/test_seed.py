@@ -9,7 +9,7 @@ from types import ModuleType
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from src.models import KnowledgeChunk, KnowledgeSource
+from src.models import AgentConfig, CrisisContact, KnowledgeChunk, KnowledgeSource
 
 
 @pytest.fixture
@@ -68,6 +68,58 @@ async def test_seed_agent_config_is_idempotent(
 
 
 @pytest.mark.asyncio
+async def test_seed_crisis_contacts_is_idempotent(
+    seed_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executed_statements: list[str] = []
+
+    class FakeSession:
+        async def execute(self, statement) -> None:
+            executed_statements.append(str(statement))
+
+    @asynccontextmanager
+    async def fake_session_scope():
+        yield FakeSession()
+
+    monkeypatch.setattr(seed_module, "session_scope", fake_session_scope)
+
+    await seed_module.seed_crisis_contacts()
+    await seed_module.seed_crisis_contacts()
+
+    assert len(executed_statements) == len(seed_module.CRISIS_CONTACTS) * 2
+    assert all("ON CONFLICT" in statement.upper() for statement in executed_statements)
+
+
+@pytest.mark.asyncio
+async def test_seed_crisis_keywords_is_idempotent(
+    seed_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executed_statements: list[str] = []
+
+    class FakeSession:
+        async def execute(self, statement) -> None:
+            executed_statements.append(str(statement))
+
+    @asynccontextmanager
+    async def fake_session_scope():
+        yield FakeSession()
+
+    monkeypatch.setattr(seed_module, "session_scope", fake_session_scope)
+
+    await seed_module.seed_crisis_keywords()
+    await seed_module.seed_crisis_keywords()
+
+    assert len(executed_statements) == len(seed_module.CRISIS_KEYWORD_PATTERNS) * 2
+    assert all("ON CONFLICT" in statement.upper() for statement in executed_statements)
+    assert all(
+        re.search(r"ON\s+CONFLICT\s*\(\s*key\s*,\s*locale\s*\)", statement, re.IGNORECASE)
+        for statement in executed_statements
+    )
+
+
+@pytest.mark.asyncio
 async def test_seed_main_skips_test_user_by_default(
     seed_module,
     monkeypatch: pytest.MonkeyPatch,
@@ -83,6 +135,12 @@ async def test_seed_main_skips_test_user_by_default(
     async def fake_seed_agent_config() -> None:
         calls.append("seed_agent_config")
 
+    async def fake_seed_crisis_contacts() -> None:
+        calls.append("seed_crisis_contacts")
+
+    async def fake_seed_crisis_keywords() -> None:
+        calls.append("seed_crisis_keywords")
+
     async def fake_seed_tts_config() -> None:
         calls.append("seed_tts_config")
 
@@ -92,6 +150,8 @@ async def test_seed_main_skips_test_user_by_default(
 
     monkeypatch.setattr(seed_module, "seed_user", fake_seed_user)
     monkeypatch.setattr(seed_module, "seed_agent_config", fake_seed_agent_config)
+    monkeypatch.setattr(seed_module, "seed_crisis_contacts", fake_seed_crisis_contacts)
+    monkeypatch.setattr(seed_module, "seed_crisis_keywords", fake_seed_crisis_keywords)
     monkeypatch.setattr(seed_module, "seed_tts_config", fake_seed_tts_config)
     monkeypatch.setattr(seed_module, "seed_knowledge_data", fake_seed_knowledge_data)
 
@@ -99,6 +159,8 @@ async def test_seed_main_skips_test_user_by_default(
 
     assert calls == [
         "seed_agent_config",
+        "seed_crisis_contacts",
+        "seed_crisis_keywords",
         "seed_tts_config",
         "seed_knowledge_data",
     ]
@@ -143,3 +205,39 @@ async def test_seed_knowledge_data_creates_source_and_chunks(
     assert source.source_type == "article"
     assert source.language == "en"
     assert chunk_count == 3
+
+
+@pytest.mark.asyncio
+async def test_seed_crisis_data_creates_contacts_and_keyword_configs(
+    seed_module,
+    db_engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    @asynccontextmanager
+    async def fake_session_scope():
+        async with factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    monkeypatch.setattr(seed_module, "session_scope", fake_session_scope)
+
+    await seed_module.seed_crisis_contacts()
+    await seed_module.seed_crisis_keywords()
+    await seed_module.seed_crisis_contacts()
+    await seed_module.seed_crisis_keywords()
+
+    async with factory() as session:
+        contact_count = await session.scalar(sa.select(sa.func.count()).select_from(CrisisContact))
+        crisis_configs = await session.scalars(
+            sa.select(AgentConfig).where(AgentConfig.key.like("crisis_keywords_%"))
+        )
+        configs = list(crisis_configs)
+
+    assert contact_count == len(seed_module.CRISIS_CONTACTS)
+    assert {config.key for config in configs} == {"crisis_keywords_en", "crisis_keywords_ru"}

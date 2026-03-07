@@ -43,6 +43,7 @@ def test_settings_defaults(livekit_required_env: None) -> None:
     assert settings.RAG_TOP_K == 5
     assert settings.RAG_LANGUAGE_BOOST == 1.5
     assert settings.RAG_EMBEDDING_TIMEOUT == 3.0
+    assert settings.CRISIS_ENABLED is True
 
 
 def test_settings_env_overrides(
@@ -65,6 +66,7 @@ def test_settings_env_overrides(
     monkeypatch.setenv("MIN_INTERRUPTION_DURATION", "0.2")
     monkeypatch.setenv("THINKING_SOUNDS_ENABLED", "false")
     monkeypatch.setenv("THINKING_SOUNDS_DELAY", "2.0")
+    monkeypatch.setenv("CRISIS_ENABLED", "false")
 
     monkeypatch.setenv("TTS_PROVIDER", "elevenlabs")
     monkeypatch.setenv("ELEVENLABS_API_KEY", "eleven_test_key")
@@ -88,6 +90,7 @@ def test_settings_env_overrides(
     assert settings.MIN_INTERRUPTION_DURATION == 0.2
     assert settings.THINKING_SOUNDS_ENABLED is False
     assert settings.THINKING_SOUNDS_DELAY == 2.0
+    assert settings.CRISIS_ENABLED is False
     assert settings.TTS_PROVIDER == "elevenlabs"
     assert settings.ELEVENLABS_API_KEY == "eleven_test_key"
     assert settings.TTS_ELEVENLABS_VOICE_ID == "voice_123"
