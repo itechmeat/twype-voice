@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from .helpers import started_livekit_session
 
 
+@pytest.mark.external
 async def test_start_session_and_agent_joins(
     authenticated_client,
     e2e_settings,

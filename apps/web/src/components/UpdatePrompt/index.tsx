@@ -18,22 +18,6 @@ export function UpdatePrompt({ needRefresh, onUpdate, resetSignal }: UpdatePromp
     }
   }, [needRefresh, resetSignal]);
 
-  useEffect(() => {
-    if (!needRefresh) {
-      return undefined;
-    }
-
-    const revealPrompt = () => {
-      setIsDismissed(false);
-    };
-
-    window.addEventListener("focus", revealPrompt);
-
-    return () => {
-      window.removeEventListener("focus", revealPrompt);
-    };
-  }, [needRefresh]);
-
   if (!needRefresh || isDismissed) {
     return null;
   }

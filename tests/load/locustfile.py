@@ -65,3 +65,6 @@ class TwypeLoadUser(LiveKitUser):
             history_response.raise_for_status()
         finally:
             self.run_async(self.leave_room())
+
+    def on_stop(self) -> None:
+        self.cleanup_loop()
