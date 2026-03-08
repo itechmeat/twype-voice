@@ -38,8 +38,7 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
 @asynccontextmanager
 async def session_scope() -> AsyncIterator[AsyncSession]:
-    async_session = get_sessionmaker()
-    async with async_session() as session:
+    async with get_sessionmaker()() as session:
         try:
             yield session
             await session.commit()

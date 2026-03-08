@@ -9,9 +9,13 @@ import { renderWithRouter } from "../test/test-utils";
 
 const apiFetchMock = vi.fn<(path: string, options?: unknown) => Promise<unknown>>();
 
-vi.mock("../lib/api-client", () => ({
-  apiFetch: (path: string, options?: unknown) => apiFetchMock(path, options),
-}));
+vi.mock("../lib/api-client", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../lib/api-client")>();
+  return {
+    ...original,
+    apiFetch: (path: string, options?: unknown) => apiFetchMock(path, options),
+  };
+});
 
 describe("auth pages", () => {
   beforeEach(() => {

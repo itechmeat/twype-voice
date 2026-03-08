@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router";
-import { apiFetch } from "../../lib/api-client";
+import { apiFetch, isTokenResponse, type TokenResponse } from "../../lib/api-client";
 import { ApiError } from "../../lib/api-error";
 import { setTokens } from "../../lib/auth-tokens";
 import { readFormValue } from "../../lib/form-utils";
@@ -13,22 +13,21 @@ type LoginRequest = {
   password: string;
 };
 
-type TokenResponse = {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-};
-
 export function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [formError, setFormError] = useState<string | null>(null);
   const mutation = useMutation<TokenResponse, ApiError, LoginRequest>({
-    mutationFn: (payload) =>
-      apiFetch<TokenResponse>("/auth/login", {
+    mutationFn: async (payload) => {
+      const body = await apiFetch<unknown>("/auth/login", {
         method: "POST",
         body: payload,
-      }),
+      });
+      if (!isTokenResponse(body)) {
+        throw new ApiError(0, "Invalid token response from server");
+      }
+      return body;
+    },
     onSuccess: (result) => {
       setTokens(result.access_token, result.refresh_token);
       void navigate("/", { replace: true });

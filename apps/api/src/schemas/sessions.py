@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SessionStartResponse(BaseModel):
@@ -13,6 +13,8 @@ class SessionStartResponse(BaseModel):
 
 
 class SessionListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     room_name: str
     status: str
@@ -26,6 +28,8 @@ class SessionHistoryResponse(BaseModel):
 
 
 class MessageItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     role: str
     mode: str

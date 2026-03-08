@@ -25,6 +25,7 @@ _CATALOG: dict[str, dict[str, str]] = {
             "<p>Your verification code: <strong>{code}</strong></p>"
             "<p>The code is valid for {ttl_minutes} minutes.</p>"
         ),
+        "auth.unexpected_error": "Unexpected authentication error",
         "sessions.session_not_found": "Session not found",
     }
 }

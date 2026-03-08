@@ -1,6 +1,6 @@
 import { apiFetch } from "./api-client";
 
-export type SessionStatus = string;
+export type SessionStatus = "active" | "ended" | "error";
 export type SessionMessageRole = "user" | "assistant";
 export type SessionMessageMode = "voice" | "text";
 
@@ -110,7 +110,7 @@ function toSessionHistoryItem(item: RawSessionHistoryItem): SessionHistoryItem {
     id: item.id,
     roomName: item.room_name,
     startedAt: item.started_at,
-    status: item.status,
+    status: item.status as SessionStatus,
   };
 }
 

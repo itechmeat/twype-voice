@@ -14,14 +14,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger("twype-agent")
 
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+_cached_models: tuple[type[Message], type[Session]] | None = None
 
 
 def _load_models() -> tuple[type[Message], type[Session]]:
+    global _cached_models
+    if _cached_models is not None:
+        return _cached_models
+
     try:
         from src.models.message import Message as MessageModel
         from src.models.session import Session as SessionModel
 
-        return MessageModel, SessionModel
+        _cached_models = (MessageModel, SessionModel)
+        return _cached_models
     except Exception as exc:
         raise RuntimeError("twype-api models are not available") from exc
 

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import sqlalchemy as sa
+from localization import build_locale_fallback_chain, normalize_locale
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -31,7 +32,7 @@ MODE_GUIDANCE_KEYS = [
 _PROMPT_BUNDLE_QUERY = sa.text(
     """
     SELECT key, locale, value, version
-    FROM agent_config
+    FROM agent_configs
     WHERE is_active = true
       AND key IN :keys
       AND locale IN :locales
@@ -71,48 +72,6 @@ class PromptBundle:
 class _PartialFormatDict(dict[str, str]):
     def __missing__(self, key: str) -> str:
         return "{" + key + "}"
-
-
-def normalize_locale(locale: str | None, *, default_locale: str = DEFAULT_PROMPT_LOCALE) -> str:
-    raw_locale = (locale or "").strip().replace("_", "-")
-    if not raw_locale or raw_locale.lower() == "multi":
-        return default_locale
-
-    parts = [part for part in raw_locale.split("-") if part]
-    if not parts:
-        return default_locale
-
-    normalized_parts = [parts[0].lower()]
-    for part in parts[1:]:
-        if len(part) == 2 and part.isalpha():
-            normalized_parts.append(part.upper())
-        elif len(part) == 4 and part.isalpha():
-            normalized_parts.append(part.title())
-        else:
-            normalized_parts.append(part)
-
-    return "-".join(normalized_parts)
-
-
-def build_locale_fallback_chain(
-    locale: str | None,
-    *,
-    default_locale: str = DEFAULT_PROMPT_LOCALE,
-) -> tuple[str, ...]:
-    normalized_locale = normalize_locale(locale, default_locale=default_locale)
-    parts = normalized_locale.split("-")
-    chain: list[str] = []
-
-    while parts:
-        candidate = "-".join(parts)
-        if candidate not in chain:
-            chain.append(candidate)
-        parts.pop()
-
-    if default_locale not in chain:
-        chain.append(default_locale)
-
-    return tuple(chain)
 
 
 async def resolve_prompt_locale(

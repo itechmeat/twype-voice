@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, text
@@ -11,6 +12,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.knowledge_constants import EMBEDDING_DIMENSION
 
 from .base import Base
+
+if TYPE_CHECKING:
+    from .knowledge_source import KnowledgeSource
 
 
 class KnowledgeChunk(Base):
@@ -37,4 +41,4 @@ class KnowledgeChunk(Base):
         DateTime(timezone=True), server_default=text("now()")
     )
 
-    source = relationship("KnowledgeSource")
+    source: Mapped[KnowledgeSource] = relationship("KnowledgeSource")

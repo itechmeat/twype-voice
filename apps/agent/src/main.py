@@ -40,6 +40,7 @@ from livekit.agents import (
 )
 from livekit.agents.voice.room_io import RoomInputOptions
 from llm import build_llm
+from localization import translate
 from prompts import (
     build_instructions,
     load_prompt_bundle,
@@ -58,8 +59,6 @@ from transcript import (
     save_transcript,
 )
 from tts import build_tts
-
-from src.localization import translate
 
 logger = logging.getLogger("twype-agent")
 _INTERRUPTION_CONTINUATION_CONTEXT_LIMIT = 400
@@ -107,7 +106,7 @@ def prewarm(proc: JobProcess) -> None:
 def _build_interruption_continuation_instruction(partial_response: str | None) -> str:
     clipped_response = (partial_response or "").strip()
     if len(clipped_response) > _INTERRUPTION_CONTINUATION_CONTEXT_LIMIT:
-        clipped_response = clipped_response[-_INTERRUPTION_CONTINUATION_CONTEXT_LIMIT :]
+        clipped_response = clipped_response[-_INTERRUPTION_CONTINUATION_CONTEXT_LIMIT:]
 
     if clipped_response:
         return (
@@ -125,44 +124,15 @@ def _build_interruption_continuation_instruction(partial_response: str | None) -
 
 
 def _extract_sentiment_raw(ev: object) -> float | None:
+    """Extract sentiment score from a speech event.
+
+    The stt module attaches sentiment_raw to the event during processing.
+    """
     for attr_name in ("sentiment_raw", "sentiment", "sentiment_score"):
         value = getattr(ev, attr_name, None)
         if isinstance(value, (int, float)):
             return float(value)
-
-    raw = getattr(ev, "raw", None)
-    if not isinstance(raw, dict):
-        return None
-
-    results = raw.get("results")
-    if not isinstance(results, dict):
-        return None
-
-    channels = results.get("channels")
-    if not isinstance(channels, list) or not channels or not isinstance(channels[0], dict):
-        return None
-
-    alternatives = channels[0].get("alternatives")
-    if (
-        not isinstance(alternatives, list)
-        or not alternatives
-        or not isinstance(alternatives[0], dict)
-    ):
-        return None
-
-    sentiments = alternatives[0].get("sentiments")
-    if not isinstance(sentiments, list):
-        return None
-
-    scores: list[float] = []
-    for item in sentiments:
-        if not isinstance(item, dict):
-            continue
-        score = item.get("sentiment")
-        if isinstance(score, (int, float)):
-            scores.append(float(score))
-
-    return (sum(scores) / len(scores)) if scores else None
+    return None
 
 
 _settings: AgentSettings | None = None
@@ -397,6 +367,9 @@ async def entrypoint(ctx: JobContext) -> None:
         room=ctx.room,
         room_input_options=room_input_options,
     )
+
+    if silence_timer is not None:
+        silence_timer.start()
 
     def _gather_recent_context(limit: int = 5) -> list[dict[str, str]]:
         chat_ctx = getattr(agent, "chat_ctx", None)

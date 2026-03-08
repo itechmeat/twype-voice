@@ -18,17 +18,4 @@ async def get_crisis_contacts(
     db: AsyncSession = Depends(get_session),
 ) -> list[CrisisContactItem]:
     contacts = await list_crisis_contacts(db, language=language)
-    return [
-        CrisisContactItem(
-            id=contact.id,
-            language=contact.language,
-            locale=contact.locale,
-            contact_type=contact.contact_type,
-            name=contact.name,
-            phone=contact.phone,
-            url=contact.url,
-            description=contact.description,
-            priority=contact.priority,
-        )
-        for contact in contacts
-    ]
+    return [CrisisContactItem.model_validate(contact, from_attributes=True) for contact in contacts]

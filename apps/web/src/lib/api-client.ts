@@ -15,9 +15,10 @@ type ErrorResponseBody = {
   detail?: string;
 };
 
-type TokenResponse = {
+export type TokenResponse = {
   access_token: string;
   refresh_token: string;
+  token_type?: string;
 };
 
 let refreshRequest: Promise<AuthTokens | null> | null = null;
@@ -100,7 +101,7 @@ function buildRequestInit(options: ApiRequestOptions): RequestInit {
   };
 }
 
-function isTokenResponse(value: unknown): value is TokenResponse {
+export function isTokenResponse(value: unknown): value is TokenResponse {
   return (
     typeof value === "object" &&
     value !== null &&

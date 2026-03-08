@@ -18,7 +18,12 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with get_sessionmaker()() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 async def get_current_user(
