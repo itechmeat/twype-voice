@@ -157,7 +157,9 @@ class TwypeDeepgramSpeechStream(deepgram_stt.SpeechStream):
             if len(alts) > 0 and alts[0].text:
                 if not self._speaking:
                     self._speaking = True
-                    self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH))
+                    self._event_ch.send_nowait(
+                        stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH)
+                    )
 
                 if is_final_transcript:
                     final_event = stt.SpeechEvent(

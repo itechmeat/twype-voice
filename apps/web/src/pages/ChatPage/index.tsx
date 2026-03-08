@@ -365,9 +365,11 @@ export function ChatPage() {
   const [restoredSession, setRestoredSession] = useState<StartSessionResponse | null>(null);
   const [roomError, setRoomError] = useState<string | null>(null);
   const [roomMountKey, setRoomMountKey] = useState(0);
+  const hasStartedRef = useRef(false);
 
   useEffect(() => {
-    if (status === "idle") {
+    if (status === "idle" && !hasStartedRef.current) {
+      hasStartedRef.current = true;
       const stored = loadStoredSession();
       if (stored !== null) {
         setRestoredSession(stored);

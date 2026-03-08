@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from chat_utils import last_user_message, resolve_message_language
 from crisis import CrisisDetector, CrisisIntervention
 from dual_layer_parser import (
     DualLayerResult,
@@ -36,7 +37,11 @@ from tts import build_tts
 logger = logging.getLogger("twype-agent")
 
 
-_DEFAULT_FILLER_PHRASE = "Hmm…"
+_FILLER_PHRASES: dict[str, str] = {
+    "en": "Hmm\u2026",
+    "ru": "\u0425\u043c\u2026",
+}
+_DEFAULT_FILLER_PHRASE = "Hmm\u2026"
 MODE_ANNOTATION_HISTORY_COUNT = 6
 ModeName = Literal["voice", "text"]
 
@@ -78,7 +83,10 @@ class ModeContext:
             self.current_language = normalized
 
 
-def _pick_filler_phrase() -> str:
+def _pick_filler_phrase(language: str | None = None) -> str:
+    if language:
+        lang = language.split("-", maxsplit=1)[0].lower()
+        return _FILLER_PHRASES.get(lang, _DEFAULT_FILLER_PHRASE)
     return _DEFAULT_FILLER_PHRASE
 
 
@@ -419,21 +427,13 @@ class TwypeAgent(Agent):
         return llm.ChatContext(items=items)
 
     def _last_user_message(self, chat_ctx: llm.ChatContext | None) -> llm.ChatMessage | None:
-        if chat_ctx is None:
-            return None
-
-        for item in reversed(chat_ctx.items):
-            if isinstance(item, llm.ChatMessage) and item.role == "user":
-                return item
-        return None
+        return last_user_message(chat_ctx)
 
     def _resolve_rag_language(self, message: llm.ChatMessage | None) -> str | None:
         if message is not None and isinstance(message.extra, dict):
-            for key in ("language", "locale"):
-                value = message.extra.get(key)
-                normalized = normalize_language_code(str(value)) if isinstance(value, str) else None
-                if normalized:
-                    return normalized
+            resolved = resolve_message_language(message.extra, self.mode_context.current_language)
+            if resolved and resolved != "en":
+                return resolved
 
         if self.mode_context.current_language:
             return self.mode_context.current_language
@@ -537,7 +537,7 @@ class TwypeAgent(Agent):
                 )
 
                 if not done:
-                    yield _pick_filler_phrase()
+                    yield _pick_filler_phrase(self.mode_context.current_language)
 
                 try:
                     first_item = await first_task

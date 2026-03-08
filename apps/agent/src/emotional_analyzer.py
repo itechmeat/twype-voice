@@ -227,6 +227,7 @@ async def refine_with_llm(
     api_key: str,
     model: str,
     timeout: float = 5.0,  # noqa: ASYNC109
+    client: httpx.AsyncClient | None = None,
 ) -> tuple[float, float] | None:
     user_content = (
         f"User utterance: {text}\n"
@@ -245,18 +246,22 @@ async def refine_with_llm(
     ]
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
-            response = await client.post(
-                f"{base_url.rstrip('/')}/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "temperature": 0.1,
-                    "max_tokens": 60,
-                },
-            )
-            response.raise_for_status()
+        request_kwargs = {
+            "url": f"{base_url.rstrip('/')}/v1/chat/completions",
+            "headers": {"Authorization": f"Bearer {api_key}"},
+            "json": {
+                "model": model,
+                "messages": messages,
+                "temperature": 0.1,
+                "max_tokens": 60,
+            },
+        }
+        if client is not None:
+            response = await client.post(**request_kwargs, timeout=httpx.Timeout(timeout))
+        else:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as ephemeral_client:
+                response = await ephemeral_client.post(**request_kwargs)
+        response.raise_for_status()
 
         data = response.json()
         content = data["choices"][0]["message"]["content"].strip()

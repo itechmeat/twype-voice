@@ -3,15 +3,13 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.localization import normalize_locale
 from src.models.crisis_contact import CrisisContact
 
 
 def normalize_contact_language(language: str | None) -> str:
-    cleaned = (language or "en").strip().lower().replace("_", "-")
-    if not cleaned:
-        return "en"
-    primary = cleaned.split("-", maxsplit=1)[0]
-    return primary if primary else "en"
+    normalized = normalize_locale(language, default_locale="en")
+    return normalized.split("-", maxsplit=1)[0]
 
 
 async def list_crisis_contacts(

@@ -16,13 +16,11 @@ async def send_verification_code(
     *,
     locale: str | None = None,
 ) -> None:
-    api_key = os.environ.get("RESEND_API_KEY")
-    if not api_key:
-        raise RuntimeError("RESEND_API_KEY is not set")
+    if not resend.api_key:
+        raise RuntimeError("RESEND_API_KEY is not set — configure it during app startup")
 
     from_address = os.environ.get("EMAIL_FROM", "Twype <noreply@twype.app>")
 
-    resend.api_key = api_key
     await asyncio.to_thread(
         resend.Emails.send,
         {

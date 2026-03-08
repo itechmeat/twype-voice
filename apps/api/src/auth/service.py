@@ -89,8 +89,6 @@ async def register_user(
         await session.rollback()
         raise EmailAlreadyRegisteredError from exc
 
-    await session.commit()
-
     try:
         await send_verification_code(user.email, user.verification_code, locale=locale)
     except Exception:
@@ -98,7 +96,6 @@ async def register_user(
         # The email provider may have accepted the message before the error,
         # and deleting the user would race with a verification attempt.
         logger.exception("Failed to send verification email for user_id=%s", user.id)
-        raise
 
 
 async def verify_user(email: str, code: str, session: AsyncSession) -> TokenResponse:

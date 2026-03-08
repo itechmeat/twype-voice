@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, DateTime, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
+
+if TYPE_CHECKING:
+    from .knowledge_chunk import KnowledgeChunk
 
 
 class KnowledgeSource(Base):
@@ -35,4 +39,8 @@ class KnowledgeSource(Base):
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
+    )
+
+    chunks: Mapped[list[KnowledgeChunk]] = relationship(
+        "KnowledgeChunk", back_populates="source"
     )

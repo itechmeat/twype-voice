@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useLocation, useNavigate } from "react-router";
-import { apiFetch } from "../../lib/api-client";
+import { apiFetch, isTokenResponse, type TokenResponse } from "../../lib/api-client";
 import { ApiError } from "../../lib/api-error";
 import { setTokens } from "../../lib/auth-tokens";
 import { readFormValue } from "../../lib/form-utils";
@@ -13,27 +13,12 @@ type VerifyRequest = {
   code: string;
 };
 
-type TokenResponse = {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-};
-
-type VerifyLocationState = {
-  email?: string;
-};
-
 function resolveEmail(state: unknown): string | null {
-  if (
-    typeof state === "object" &&
-    state !== null &&
-    "email" in state &&
-    typeof (state as VerifyLocationState).email === "string" &&
-    (state as VerifyLocationState).email!.length > 0
-  ) {
-    return (state as VerifyLocationState).email!;
+  if (typeof state !== "object" || state === null || !("email" in state)) {
+    return null;
   }
-  return null;
+  const email = (state as Record<string, unknown>).email;
+  return typeof email === "string" && email.length > 0 ? email : null;
 }
 
 export function VerifyPage() {
@@ -43,11 +28,16 @@ export function VerifyPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const email = resolveEmail(location.state);
   const mutation = useMutation<TokenResponse, ApiError, VerifyRequest>({
-    mutationFn: (payload) =>
-      apiFetch<TokenResponse>("/auth/verify", {
+    mutationFn: async (payload) => {
+      const body = await apiFetch<unknown>("/auth/verify", {
         method: "POST",
         body: payload,
-      }),
+      });
+      if (!isTokenResponse(body)) {
+        throw new ApiError(0, "Invalid token response from server");
+      }
+      return body;
+    },
     onSuccess: (result) => {
       setTokens(result.access_token, result.refresh_token);
       void navigate("/", { replace: true });

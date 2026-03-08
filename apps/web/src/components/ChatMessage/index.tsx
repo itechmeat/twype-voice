@@ -74,7 +74,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
         <span className={styles.mode}>{message.mode}</span>
         <time dateTime={message.createdAt}>{formatMessageTimestamp(message.createdAt)}</time>
         {deliveryLabel !== null ? (
-          <span className={clsx(styles.delivery, isDeliveryFailed && styles.deliveryFailed)}>
+          <span className={clsx(styles.delivery, isDeliveryFailed && styles.deliveryFailed)} aria-live="polite">
             {deliveryLabel}
           </span>
         ) : null}

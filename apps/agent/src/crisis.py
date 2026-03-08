@@ -8,14 +8,11 @@ from dataclasses import dataclass, field
 from re import Pattern
 
 import httpx
+from chat_utils import last_user_message, resolve_message_language
 from languages import normalize_language_code
 from livekit.agents import llm
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-from src.models.agent_config import AgentConfig
-from src.models.crisis_contact import CrisisContact
-from src.models.message import Message
 
 logger = logging.getLogger("twype-agent.crisis")
 
@@ -124,6 +121,8 @@ class CrisisDetector:
     async def load_keywords(self) -> None:
         if not self._enabled:
             return
+
+        from src.models.agent_config import AgentConfig
 
         async with self._sessionmaker() as session:
             result = await session.execute(
@@ -286,6 +285,8 @@ class CrisisDetector:
         )
 
     async def _fetch_contacts_for_language(self, language: str) -> list[CrisisContactInfo]:
+        from src.models.crisis_contact import CrisisContact
+
         async with self._sessionmaker() as session:
             result = await session.execute(
                 select(CrisisContact)
@@ -490,6 +491,8 @@ class CrisisDetector:
         )
 
     async def _flag_message_as_crisis(self, message_id: uuid.UUID) -> None:
+        from src.models.message import Message
+
         async with self._sessionmaker() as session:
             await session.execute(
                 update(Message).where(Message.id == message_id).values(is_crisis=True)
@@ -497,22 +500,14 @@ class CrisisDetector:
             await session.commit()
 
     def _last_user_message(self, chat_ctx: llm.ChatContext) -> llm.ChatMessage | None:
-        for item in reversed(chat_ctx.items):
-            if isinstance(item, llm.ChatMessage) and item.role == "user":
-                return item
-        return None
+        return last_user_message(chat_ctx)
 
     def _resolve_message_language(
         self,
         extra: dict[str, object],
         session_language: str | None,
     ) -> str:
-        for key in ("language", "locale"):
-            value = extra.get(key)
-            normalized = normalize_language_code(str(value)) if isinstance(value, str) else None
-            if normalized:
-                return normalized
-        return normalize_language_code(session_language) or "en"
+        return resolve_message_language(extra, session_language)
 
     def _extract_completion_content(self, response_json: dict[str, object]) -> str:
         choices = response_json.get("choices")

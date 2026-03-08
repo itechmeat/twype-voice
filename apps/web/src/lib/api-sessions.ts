@@ -1,6 +1,6 @@
 import { apiFetch } from "./api-client";
 
-export type SessionStatus = string;
+export type SessionStatus = "active" | "ended" | "error";
 export type SessionMessageRole = "user" | "assistant";
 export type SessionMessageMode = "voice" | "text";
 
@@ -34,7 +34,7 @@ type RawSessionHistoryResponse = {
 type RawSessionHistoryItem = {
   id: string;
   room_name: string;
-  status: string;
+  status: SessionStatus;
   started_at: string;
   ended_at?: string | null;
 };
@@ -56,6 +56,10 @@ function isSessionMessageMode(value: unknown): value is SessionMessageMode {
   return value === "voice" || value === "text";
 }
 
+function isSessionStatus(value: unknown): value is SessionStatus {
+  return value === "active" || value === "ended" || value === "error";
+}
+
 function isRawSessionHistoryItem(value: unknown): value is RawSessionHistoryItem {
   return (
     typeof value === "object" &&
@@ -65,7 +69,7 @@ function isRawSessionHistoryItem(value: unknown): value is RawSessionHistoryItem
     "room_name" in value &&
     typeof value.room_name === "string" &&
     "status" in value &&
-    typeof value.status === "string" &&
+    isSessionStatus(value.status) &&
     "started_at" in value &&
     typeof value.started_at === "string" &&
     (!("ended_at" in value) || value.ended_at === null || typeof value.ended_at === "string")

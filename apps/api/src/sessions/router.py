@@ -36,7 +36,6 @@ async def start_session(
         api_key=livekit.LIVEKIT_API_KEY,
         api_secret=livekit.LIVEKIT_API_SECRET,
     )
-    await db.commit()
     return SessionStartResponse(
         session_id=session.id,
         room_name=session.room_name,
@@ -58,16 +57,7 @@ async def list_sessions(
         limit=limit,
         db=db,
     )
-    items = [
-        SessionListItem(
-            id=s.id,
-            room_name=s.room_name,
-            status=s.status,
-            started_at=s.started_at,
-            ended_at=s.ended_at,
-        )
-        for s in sessions
-    ]
+    items = [SessionListItem.model_validate(s, from_attributes=True) for s in sessions]
     return SessionHistoryResponse(items=items, total=total)
 
 
@@ -88,14 +78,4 @@ async def list_messages(
             detail=translate("sessions.session_not_found", locale=locale),
         ) from exc
 
-    return [
-        MessageItem(
-            id=m.id,
-            role=m.role,
-            mode=m.mode,
-            content=m.content,
-            source_ids=m.source_ids,
-            created_at=m.created_at,
-        )
-        for m in messages
-    ]
+    return [MessageItem.model_validate(m, from_attributes=True) for m in messages]

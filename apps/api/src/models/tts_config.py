@@ -11,7 +11,7 @@ from .base import Base
 
 
 class TTSConfig(Base):
-    __tablename__ = "tts_config"
+    __tablename__ = "tts_configs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 

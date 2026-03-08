@@ -54,7 +54,12 @@ async def client(db_engine) -> AsyncIterator[AsyncClient]:
 
     async def _override() -> AsyncIterator[AsyncSession]:
         async with factory() as sess:
-            yield sess
+            try:
+                yield sess
+                await sess.commit()
+            except Exception:
+                await sess.rollback()
+                raise
 
     app.dependency_overrides[get_session] = _override
     transport = ASGITransport(app=app)
