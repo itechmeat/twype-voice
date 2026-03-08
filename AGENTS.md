@@ -77,7 +77,12 @@ first, then fall back to general search:
 
 Search queries should cover the key technologies of the current task (e.g., "FastAPI", "React",
 "LiveKit", "PostgreSQL", "pgvector", "Docker", "Vite", "Bun", "SQLAlchemy", "Alembic").
-Install any found skills that are relevant before starting implementation.
+Install any found skills **into the project** (not globally) before starting implementation:
+
+```bash
+npx skills add <owner/repo@skill> -y        # project-local (default)
+# Do NOT use -g flag — keep skills scoped to this project
+```
 
 ### Story planning
 

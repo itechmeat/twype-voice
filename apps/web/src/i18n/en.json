@@ -132,5 +132,11 @@
   },
   "network": {
     "offline": "Offline. Twype shell is cached, but live voice and text features need a connection."
+  },
+  "pwa": {
+    "updateTitle": "A new version of Twype is ready.",
+    "updateBody": "Finish your current conversation first if needed, then reload to apply the update.",
+    "updateNow": "Update",
+    "updateLater": "Later"
   }
 }
