@@ -19,6 +19,10 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.26",
     "httpx>=0.28",
+    "locust>=2.32",
+    "asyncpg>=0.31",
+    "livekit>=1.0",
+    "sqlalchemy>=2.0",
 ]
 
 [tool.ruff]
@@ -52,3 +56,6 @@ quote-style = "double"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["apps/api"]
+markers = [
+    "external: requires external providers or credentials beyond the local Docker Compose stack",
+]

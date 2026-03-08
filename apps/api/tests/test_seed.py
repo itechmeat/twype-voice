@@ -119,6 +119,80 @@ async def test_seed_crisis_keywords_is_idempotent(
     )
 
 
+def test_seed_prompt_layers_are_complete_for_en_and_ru(seed_module) -> None:
+    expected_keys = {
+        "system_prompt",
+        "voice_prompt",
+        "dual_layer_prompt",
+        "emotion_prompt",
+        "crisis_prompt",
+        "rag_prompt",
+        "language_prompt",
+        "proactive_prompt",
+        "mode_voice_guidance",
+        "mode_text_guidance",
+    }
+
+    assert set(seed_module.PROMPT_LAYER_TRANSLATIONS["en"]) == expected_keys
+    assert set(seed_module.PROMPT_LAYER_TRANSLATIONS["ru"]) == expected_keys
+    assert all(
+        seed_module.PROMPT_LAYER_TRANSLATIONS[locale][key].strip()
+        for locale in ("en", "ru")
+        for key in expected_keys
+    )
+    assert all(
+        seed_module.PROMPT_LAYER_TRANSLATIONS["ru"][key]
+        != seed_module.PROMPT_LAYER_TRANSLATIONS["en"][key]
+        for key in expected_keys
+    )
+
+
+def test_seed_crisis_contacts_cover_en_and_ru_locales(seed_module) -> None:
+    contacts_by_locale: dict[tuple[str, str], list[dict[str, object]]] = {}
+
+    for contact in seed_module.CRISIS_CONTACTS:
+        locale_key = (str(contact["language"]), str(contact["locale"]))
+        contacts_by_locale.setdefault(locale_key, []).append(contact)
+
+    assert len(contacts_by_locale[("en", "US")]) >= 3
+    assert len(contacts_by_locale[("ru", "RU")]) >= 3
+    assert all(
+        str(contact["phone"]).strip() and str(contact["description"]).strip()
+        for contact in seed_module.CRISIS_CONTACTS
+    )
+
+
+@pytest.mark.asyncio
+async def test_seed_tts_config_is_idempotent(
+    seed_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executed_statements: list[object] = []
+
+    class FakeSession:
+        async def execute(self, statement) -> None:
+            executed_statements.append(statement)
+
+    @asynccontextmanager
+    async def fake_session_scope():
+        yield FakeSession()
+
+    monkeypatch.setattr(seed_module, "session_scope", fake_session_scope)
+
+    await seed_module.seed_tts_config()
+    await seed_module.seed_tts_config()
+
+    assert len(executed_statements) == 2
+    assert all("ON CONFLICT" in str(statement).upper() for statement in executed_statements)
+    assert all(
+        statement.compile().params["voice_id"] == "Olivia" for statement in executed_statements
+    )
+    assert all(
+        statement.compile().params["model_id"] == "inworld-tts-1.5-max"
+        for statement in executed_statements
+    )
+
+
 @pytest.mark.asyncio
 async def test_seed_main_skips_test_user_by_default(
     seed_module,

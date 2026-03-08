@@ -50,8 +50,8 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      injectRegister: "auto",
-      registerType: "autoUpdate",
+      injectRegister: null,
+      registerType: "prompt",
       strategies: "generateSW",
       manifest: false,
       includeAssets: [
@@ -64,8 +64,6 @@ export default defineConfig({
         "apple-touch-icon-180x180.png",
       ],
       workbox: {
-        clientsClaim: true,
-        skipWaiting: true,
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
