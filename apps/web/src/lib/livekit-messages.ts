@@ -65,14 +65,14 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
 }
 
-function hasStringField(value: UnknownRecord, key: string): value is UnknownRecord & Record<string, string> {
+function hasStringField<K extends string>(value: UnknownRecord, key: K): value is UnknownRecord & Record<K, string> {
   return typeof value[key] === "string";
 }
 
-function hasBooleanField(
+function hasBooleanField<K extends string>(
   value: UnknownRecord,
-  key: string,
-): value is UnknownRecord & Record<string, boolean> {
+  key: K,
+): value is UnknownRecord & Record<K, boolean> {
   return typeof value[key] === "boolean";
 }
 
@@ -80,7 +80,7 @@ function hasOptionalStringField(value: UnknownRecord, key: string): boolean {
   return value[key] === undefined || typeof value[key] === "string";
 }
 
-function isStructuredResponseItem(value: unknown): value is StructuredResponseItem {
+export function isStructuredResponseItem(value: unknown): value is StructuredResponseItem {
   if (!isRecord(value) || !hasStringField(value, "text")) {
     return false;
   }

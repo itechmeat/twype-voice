@@ -45,10 +45,12 @@ export function useDataChannel(handlers: HandlerMap): void {
         return;
       }
 
-      const handler = handlersRef.current[parsedMessage.type];
+      const handler = handlersRef.current[parsedMessage.type] as
+        | ((message: IncomingLiveKitMessage) => void)
+        | undefined;
 
       if (handler !== undefined) {
-        handler(parsedMessage as never);
+        handler(parsedMessage);
       }
     };
 

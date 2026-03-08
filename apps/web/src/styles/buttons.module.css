@@ -1,0 +1,20 @@
+.base {
+  border: 0;
+  border-radius: 999px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 16px;
+  background: rgba(23, 32, 51, 0.08);
+  color: #172033;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.accent {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 87, 217, 0.12);
+  color: #0057d9;
+  cursor: pointer;
+  font-weight: 700;
+}

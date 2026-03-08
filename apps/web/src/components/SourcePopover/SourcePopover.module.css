@@ -1,0 +1,129 @@
+.root {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: min(360px, calc(100vw - 48px));
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(23, 32, 51, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 24px 60px rgba(23, 32, 51, 0.16);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header h3 {
+  margin: 0;
+}
+
+.headerButton {
+  composes: accent from '../../styles/buttons.module.css';
+  min-height: 44px;
+  padding: 8px 12px;
+}
+
+.state {
+  margin: 0;
+  color: rgba(23, 32, 51, 0.74);
+}
+
+.stateError {
+  display: grid;
+  gap: 10px;
+}
+
+.stateError p {
+  margin: 0;
+}
+
+.stateButton {
+  composes: accent from '../../styles/buttons.module.css';
+  min-height: 44px;
+  padding: 8px 12px;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(23, 32, 51, 0.05);
+}
+
+.itemHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.itemHeader h4 {
+  margin: 0;
+}
+
+.type {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(23, 32, 51, 0.08);
+  color: rgba(23, 32, 51, 0.78);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  margin: 0;
+}
+
+.meta dt {
+  color: rgba(23, 32, 51, 0.6);
+  font-weight: 600;
+}
+
+.meta dd {
+  margin: 0;
+}
+
+.meta a {
+  color: #0057d9;
+}
+
+.meta a:hover {
+  text-decoration: underline;
+}
+
+.meta a:focus-visible {
+  outline: 2px solid rgba(0, 87, 217, 0.5);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@media (max-width: 640px) {
+  .root {
+    left: auto;
+    right: 0;
+    width: min(320px, calc(100vw - 32px));
+  }
+}

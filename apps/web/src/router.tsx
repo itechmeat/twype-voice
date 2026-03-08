@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate } from "react-router";
+import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { ProtectedLayout } from "./layouts/ProtectedLayout";
 import { PublicLayout } from "./layouts/PublicLayout";
 import { ChatPage } from "./pages/ChatPage";
@@ -10,42 +11,47 @@ import { VerifyPage } from "./pages/VerifyPage";
 
 export const appRoutes = [
   {
-    element: <PublicLayout />,
+    errorElement: <RouteErrorBoundary />,
     children: [
       {
-        path: "/login",
-        element: <LoginPage />,
+        element: <PublicLayout />,
+        children: [
+          {
+            path: "/login",
+            element: <LoginPage />,
+          },
+          {
+            path: "/register",
+            element: <RegisterPage />,
+          },
+          {
+            path: "/verify",
+            element: <VerifyPage />,
+          },
+        ],
       },
       {
-        path: "/register",
-        element: <RegisterPage />,
+        element: <ProtectedLayout />,
+        children: [
+          {
+            path: "/",
+            element: <ChatPage />,
+          },
+          {
+            path: "/history",
+            element: <HistoryPage />,
+          },
+          {
+            path: "/history/:sessionId",
+            element: <SessionDetailPage />,
+          },
+        ],
       },
       {
-        path: "/verify",
-        element: <VerifyPage />,
+        path: "*",
+        element: <Navigate to="/" replace />,
       },
     ],
-  },
-  {
-    element: <ProtectedLayout />,
-    children: [
-      {
-        path: "/",
-        element: <ChatPage />,
-      },
-      {
-        path: "/history",
-        element: <HistoryPage />,
-      },
-      {
-        path: "/history/:sessionId",
-        element: <SessionDetailPage />,
-      },
-    ],
-  },
-  {
-    path: "*",
-    element: <Navigate to="/login" replace />,
   },
 ];
 

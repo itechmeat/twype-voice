@@ -1,0 +1,80 @@
+.root {
+  display: grid;
+  gap: 10px;
+  max-width: min(100%, 720px);
+  padding: 16px 18px;
+  border-radius: 22px;
+}
+
+.user {
+  justify-self: end;
+  background: linear-gradient(135deg, #0057d9 0%, #2d7ff9 100%);
+  color: #ffffff;
+}
+
+.agent {
+  justify-self: start;
+  background: rgba(23, 32, 51, 0.05);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mode {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(23, 32, 51, 0.08);
+}
+
+.delivery {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(23, 32, 51, 0.08);
+}
+
+.user .mode {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.user .delivery {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.delivery.deliveryFailed {
+  background: rgba(180, 35, 24, 0.18);
+}
+
+.text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.body {
+  display: grid;
+  gap: 8px;
+}
+
+.structured {
+  display: grid;
+  gap: 10px;
+}
+
+.structuredItem {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.structuredItem p {
+  margin: 0;
+  white-space: pre-wrap;
+}

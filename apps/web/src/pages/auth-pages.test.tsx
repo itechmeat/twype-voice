@@ -151,7 +151,7 @@ describe("auth pages", () => {
         { path: "/verify", element: <VerifyPage /> },
         { path: "/", element: <h1>Home destination</h1> },
       ],
-      ["/verify?email=user@example.com"],
+      [{ pathname: "/verify", state: { email: "user@example.com" } }],
     );
 
     await user.type(screen.getByLabelText("Code"), "123456");
@@ -177,7 +177,7 @@ describe("auth pages", () => {
         { path: "/verify", element: <VerifyPage /> },
         { path: "/", element: <h1>Home destination</h1> },
       ],
-      ["/verify?email=user@example.com"],
+      [{ pathname: "/verify", state: { email: "user@example.com" } }],
     );
 
     await user.type(screen.getByLabelText("Code"), "123456");
@@ -202,7 +202,7 @@ describe("auth pages", () => {
 
     renderWithRouter(
       [{ path: "/verify", element: <VerifyPage /> }],
-      ["/verify?email=user@example.com"],
+      [{ pathname: "/verify", state: { email: "user@example.com" } }],
     );
 
     await user.type(screen.getByLabelText("Code"), "123456");

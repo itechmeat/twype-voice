@@ -1,0 +1,32 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: rgba(23, 32, 51, 0.05);
+  font-weight: 700;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8793a5;
+}
+
+.root[data-state="listening"] .dot {
+  background: #0f9f6e;
+}
+
+.root[data-state="thinking"] .dot {
+  background: #e58b00;
+}
+
+.root[data-state="speaking"] .dot {
+  background: #0057d9;
+}
+
+.root[data-state="disconnected"] .dot {
+  background: #b42318;
+}

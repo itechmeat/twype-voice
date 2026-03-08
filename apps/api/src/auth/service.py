@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,8 @@ from src.auth.exceptions import (
 from src.auth.jwt import create_access_token, create_refresh_token, decode_token
 from src.models.user import User
 from src.schemas.auth import TokenResponse
+
+logger = logging.getLogger(__name__)
 
 VERIFICATION_CODE_TTL_MINUTES = 10
 
@@ -91,11 +94,10 @@ async def register_user(
     try:
         await send_verification_code(user.email, user.verification_code, locale=locale)
     except Exception:
-        await session.rollback()
-        persisted_user = await session.get(User, user.id)
-        if persisted_user is not None and not persisted_user.is_verified:
-            await session.delete(persisted_user)
-            await session.commit()
+        # Keep the unverified user row so the client can retry or resend.
+        # The email provider may have accepted the message before the error,
+        # and deleting the user would race with a verification attempt.
+        logger.exception("Failed to send verification email for user_id=%s", user.id)
         raise
 
 

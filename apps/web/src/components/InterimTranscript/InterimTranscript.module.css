@@ -1,0 +1,8 @@
+.root {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(0, 87, 217, 0.08);
+  color: #003d99;
+  font-style: italic;
+}

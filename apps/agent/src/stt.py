@@ -238,7 +238,18 @@ class TwypeDeepgramSTT(deepgram.STT):
                     config.language,
                     payload,
                 )
-                return _attach_sentiment(event, payload["results"]["channels"][0])
+
+                results = payload.get("results")
+                channels = results.get("channels") if isinstance(results, dict) else None
+                if not isinstance(channels, list) or not channels:
+                    deepgram_logger.warning(
+                        "Deepgram prerecorded response missing expected"
+                        " results.channels structure: %s",
+                        payload,
+                    )
+                    return event
+
+                return _attach_sentiment(event, channels[0])
         except TimeoutError as exc:
             raise APITimeoutError() from exc
         except aiohttp.ClientResponseError as exc:

@@ -1,11 +1,9 @@
 import type { ChatMessageEntry } from "./chat-state";
 import type { SessionMessageItem } from "./api-sessions";
+import { isStructuredResponseItem, type StructuredResponseItem } from "./livekit-messages";
 
 type StructuredContent = {
-  items: Array<{
-    text: string;
-    chunk_ids: string[];
-  }>;
+  items: StructuredResponseItem[];
 };
 
 function isStructuredContent(value: unknown): value is StructuredContent {
@@ -14,16 +12,7 @@ function isStructuredContent(value: unknown): value is StructuredContent {
     value !== null &&
     "items" in value &&
     Array.isArray(value.items) &&
-    value.items.every(
-      (item) =>
-        typeof item === "object" &&
-        item !== null &&
-        "text" in item &&
-        typeof item.text === "string" &&
-        "chunk_ids" in item &&
-        Array.isArray(item.chunk_ids) &&
-        item.chunk_ids.every((chunkId: unknown) => typeof chunkId === "string"),
-    )
+    value.items.every(isStructuredResponseItem)
   );
 }
 

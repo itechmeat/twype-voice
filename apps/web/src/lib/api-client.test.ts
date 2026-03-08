@@ -22,6 +22,7 @@ describe("apiFetch", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("serializes JSON bodies and injects auth headers", async () => {
@@ -95,7 +96,7 @@ describe("apiFetch", () => {
     await expect(apiFetch("/auth/register", { method: "POST", body: {} })).rejects.toMatchObject({
       name: "ApiError",
       status: 409,
-      detail: "Email is already registered",
+      message: "Email is already registered",
     });
   });
 
@@ -114,7 +115,7 @@ describe("apiFetch", () => {
 
     await expect(apiFetch("/auth/register", { method: "POST", body: {} })).rejects.toMatchObject({
       status: 500,
-      detail: "Internal Server Error",
+      message: "Internal Server Error",
     });
   });
 
@@ -209,11 +210,11 @@ describe("apiFetch", () => {
 
     await expect(firstRequest).rejects.toMatchObject({
       status: 401,
-      detail: "Unauthorized",
+      message: "Unauthorized",
     });
     await expect(secondRequest).rejects.toMatchObject({
       status: 401,
-      detail: "Unauthorized",
+      message: "Unauthorized",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -294,7 +295,7 @@ describe("apiFetch", () => {
 
     await expect(apiFetch("/sessions/history")).rejects.toMatchObject({
       status: 401,
-      detail: "Unauthorized",
+      message: "Unauthorized",
     });
     expect(getTokens()).toEqual({
       accessToken: null,
