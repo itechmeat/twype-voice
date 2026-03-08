@@ -1,0 +1,13 @@
+.root {
+  composes: base from '../../styles/buttons.module.css';
+}
+
+.active {
+  background: rgba(15, 159, 110, 0.12);
+  color: #0f9f6e;
+}
+
+.muted {
+  background: rgba(180, 35, 24, 0.1);
+  color: #b42318;
+}

@@ -1,0 +1,28 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="512"
+  height="512"
+  viewBox="0 0 512 512"
+  fill="none"
+>
+  <defs>
+    <linearGradient id="twypeGradient" x1="96" x2="432" y1="64" y2="448" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0057D9" />
+      <stop offset="1" stop-color="#2D7FF9" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="136" fill="url(#twypeGradient)" />
+  <circle cx="384" cy="130" r="68" fill="#A8D4FF" fill-opacity="0.28" />
+  <circle cx="136" cy="390" r="96" fill="#F6F1EB" fill-opacity="0.18" />
+  <path
+    fill="#F6F1EB"
+    d="M146 168c0-27.614 22.386-50 50-50h142c27.614 0 50 22.386 50 50v92c0 27.614-22.386 50-50 50h-62.184l-53.746 57.768c-8.836 9.497-24.82 3.246-24.82-9.725V310H196c-27.614 0-50-22.386-50-50v-92Z"
+  />
+  <path
+    stroke="#0057D9"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="24"
+    d="M216 184c17.673-17.673 46.327-17.673 64 0m-86 52c31.827-31.827 83.173-31.827 115 0m-136 53c43.815-43.815 114.185-43.815 158 0"
+  />
+</svg>

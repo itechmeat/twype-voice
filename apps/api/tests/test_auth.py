@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import bcrypt
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +52,24 @@ class TestRegister:
     async def test_short_password(self, client: AsyncClient, unique_email: str):
         resp = await _register(client, unique_email, password="short")
         assert resp.status_code == 422
+
+    async def test_registration_removes_user_when_email_delivery_fails(
+        self,
+        client: AsyncClient,
+        session: AsyncSession,
+        unique_email: str,
+        monkeypatch,
+    ):
+        async def fail_send(*_args, **_kwargs) -> None:
+            raise RuntimeError("email delivery failed")
+
+        monkeypatch.setattr("src.auth.service.send_verification_code", fail_send)
+
+        with pytest.raises(RuntimeError, match="email delivery failed"):
+            await _register(client, unique_email)
+
+        result = await session.execute(select(User).where(User.email == unique_email))
+        assert result.scalar_one_or_none() is None
 
 
 # ---------------------------------------------------------------------------

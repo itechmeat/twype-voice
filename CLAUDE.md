@@ -60,6 +60,25 @@ When delegating to agents, pass raw intent — what needs to happen and why. Don
 
 When delegating work to subagents or spawning a team, use the `/team-lead` skill.
 
+### Skill discovery
+
+After planning a story (or any development task), the agent MUST use the `find-skills` skill to
+search for relevant skills matching the technologies and tools involved. Search priority sources
+first, then fall back to general search:
+
+**Priority sources (search in this order):**
+
+1. `https://github.com/itechmeat/llm-code`
+2. `https://github.com/ancoleman/ai-design-components`
+3. `https://github.com/trailofbits/skills`
+4. `https://skills.sh/antfu/skills`
+5. `https://skills.sh/wshobson/agents`
+6. `https://github.com/coreyhaines31/marketingskills`
+
+Search queries should cover the key technologies of the current task (e.g., "FastAPI", "React",
+"LiveKit", "PostgreSQL", "pgvector", "Docker", "Vite", "Bun", "SQLAlchemy", "Alembic").
+Install any found skills that are relevant before starting implementation.
+
 ### Story planning
 
 When the user asks to "plan the next story" (or similar), find the first unchecked (`- [ ]`) story in `docs/plan.md` and use it as input for `/openspec-new-change`. Stories are sequential — always pick the next one by order, not by topic.

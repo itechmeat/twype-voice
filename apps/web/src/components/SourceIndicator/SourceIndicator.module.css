@@ -1,0 +1,25 @@
+.root {
+  position: relative;
+  justify-self: start;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.button {
+  composes: accent from '../../styles/buttons.module.css';
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px;
+}
+
+.button svg {
+  width: 18px;
+  height: 18px;
+}

@@ -17,20 +17,27 @@ TEST_DATABASE_SUFFIX = "_test"
 _ensured_databases: set[str] = set()
 
 
-def default_test_database_url(env: Mapping[str, str] | None = None) -> str:
+def default_test_database_url(
+    env: Mapping[str, str] | None = None,
+    *,
+    scope: str | None = None,
+) -> str:
     values = {**_root_env_values(), **(env if env is not None else os.environ)}
     explicit_test_url = values.get("TEST_DATABASE_URL")
     if explicit_test_url:
-        return _validated_test_database_url(explicit_test_url)
+        return _scoped_database_url(_validated_test_database_url(explicit_test_url), scope=scope)
 
     base_url = values.get("DATABASE_URL", DEFAULT_DATABASE_URL)
     parsed_url = make_url(_normalize_host_database_url(base_url))
     database_name = parsed_url.database or "postgres"
 
     if database_name.endswith(TEST_DATABASE_SUFFIX):
-        return _render_database_url(parsed_url)
+        return _scoped_database_url(_render_database_url(parsed_url), scope=scope)
 
-    return _render_database_url(parsed_url.set(database=f"{database_name}{TEST_DATABASE_SUFFIX}"))
+    return _scoped_database_url(
+        _render_database_url(parsed_url.set(database=f"{database_name}{TEST_DATABASE_SUFFIX}")),
+        scope=scope,
+    )
 
 
 async def ensure_database_exists(database_url: str) -> None:
@@ -112,6 +119,33 @@ def _validated_test_database_url(database_url: str) -> str:
     if not database_name.endswith(TEST_DATABASE_SUFFIX):
         raise ValueError("TEST_DATABASE_URL must target a *_test database")
     return _render_database_url(parsed_url)
+
+
+def _scoped_database_url(database_url: str, *, scope: str | None) -> str:
+    normalized_scope = _normalize_scope(scope)
+    if normalized_scope is None:
+        return database_url
+
+    parsed_url = make_url(database_url)
+    database_name = parsed_url.database or ""
+    if not database_name.endswith(TEST_DATABASE_SUFFIX):
+        raise ValueError("Scoped test database URLs must target a *_test database")
+
+    base_name = database_name[: -len(TEST_DATABASE_SUFFIX)]
+    scoped_name = f"{base_name}_{normalized_scope}{TEST_DATABASE_SUFFIX}"
+    return _render_database_url(parsed_url.set(database=scoped_name))
+
+
+def _normalize_scope(scope: str | None) -> str | None:
+    if scope is None:
+        return None
+
+    normalized = "".join(char if char.isalnum() else "_" for char in scope.strip().lower()).strip(
+        "_"
+    )
+    if not normalized:
+        raise ValueError("scope must contain at least one alphanumeric character")
+    return normalized
 
 
 @lru_cache(maxsize=1)

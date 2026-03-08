@@ -1,0 +1,51 @@
+:root {
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: #172033;
+  background:
+    radial-gradient(circle at top, rgba(103, 183, 255, 0.3), transparent 36%),
+    linear-gradient(180deg, #eef7ff 0%, #f6f1eb 100%);
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: inherit;
+  color: inherit;
+  overflow-x: clip;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+a {
+  color: #0057d9;
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0057d9;
+}

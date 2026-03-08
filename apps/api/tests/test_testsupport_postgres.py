@@ -21,6 +21,15 @@ def test_default_test_database_url_accepts_test_override() -> None:
     assert database_url.endswith("/twype_test")
 
 
+def test_default_test_database_url_applies_scope() -> None:
+    database_url = postgres_support.default_test_database_url(
+        {"TEST_DATABASE_URL": "postgresql+asyncpg://twype:secret@localhost:5432/twype_test"},
+        scope="agent-rag",
+    )
+
+    assert database_url.endswith("/twype_agent_rag_test")
+
+
 @pytest.mark.asyncio
 async def test_ensure_database_exists_ignores_duplicate_create(
     monkeypatch: pytest.MonkeyPatch,

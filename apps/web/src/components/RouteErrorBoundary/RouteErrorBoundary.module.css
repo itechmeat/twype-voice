@@ -1,0 +1,29 @@
+.root {
+  display: grid;
+  gap: 12px;
+  place-content: center;
+  min-height: 100dvh;
+  padding: 24px;
+  text-align: center;
+}
+
+.eyebrow {
+  margin: 0;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(23, 32, 51, 0.5);
+}
+
+.root h1 {
+  margin: 0;
+}
+
+.root p {
+  margin: 0;
+}
+
+.root a {
+  color: #0057d9;
+  font-weight: 700;
+}

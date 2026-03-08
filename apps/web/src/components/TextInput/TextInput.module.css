@@ -1,0 +1,48 @@
+.root {
+  display: grid;
+  gap: 12px;
+  padding: 20px 24px 24px;
+  border-top: 1px solid rgba(23, 32, 51, 0.08);
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 88px;
+  padding: 14px 16px;
+  border: 1px solid rgba(23, 32, 51, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  outline: none;
+}
+
+.textarea:focus {
+  border-color: #0057d9;
+  box-shadow: 0 0 0 3px rgba(0, 87, 217, 0.12);
+}
+
+.send {
+  composes: base from '../../styles/buttons.module.css';
+  justify-self: end;
+  background: linear-gradient(135deg, #0057d9 0%, #2d7ff9 100%);
+  color: #ffffff;
+}
+
+@media (max-width: 640px) {
+  .root {
+    padding: 16px;
+  }
+
+  .send {
+    justify-self: stretch;
+  }
+}

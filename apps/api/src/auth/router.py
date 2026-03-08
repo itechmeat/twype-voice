@@ -62,7 +62,6 @@ async def register(
         await register_user(body.email, body.password, session, locale=locale)
     except Exception as exc:
         _raise_for_auth_error(exc, locale=locale)
-    await session.commit()
     return RegisterResponse(
         message=translate("auth.registration_success", locale=locale),
         email=body.email,

@@ -116,7 +116,7 @@ def test_settings_requires_inworld_api_key_when_inworld(monkeypatch: pytest.Monk
     monkeypatch.setenv("LIVEKIT_API_KEY", "api-key-for-tests")
     monkeypatch.setenv("LIVEKIT_API_SECRET", "api-secret-for-tests-with-32-bytes")
     monkeypatch.setenv("DEEPGRAM_API_KEY", "dg_test_key")
-    monkeypatch.setenv("DATABASE_URL", default_test_database_url())
+    monkeypatch.setenv("DATABASE_URL", default_test_database_url(scope="agent_settings"))
     monkeypatch.setenv("LITELLM_URL", "http://litellm:4000")
     monkeypatch.setenv("LITELLM_MASTER_KEY", "litellm_master_key")
     monkeypatch.setenv("TTS_PROVIDER", "inworld")
