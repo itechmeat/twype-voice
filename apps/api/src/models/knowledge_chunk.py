@@ -41,4 +41,4 @@ class KnowledgeChunk(Base):
         DateTime(timezone=True), server_default=text("now()")
     )
 
-    source: Mapped[KnowledgeSource] = relationship("KnowledgeSource")
+    source: Mapped[KnowledgeSource] = relationship("KnowledgeSource", back_populates="chunks")
