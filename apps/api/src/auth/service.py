@@ -86,7 +86,17 @@ async def register_user(
         await session.rollback()
         raise EmailAlreadyRegisteredError from exc
 
-    await send_verification_code(user.email, user.verification_code, locale=locale)
+    await session.commit()
+
+    try:
+        await send_verification_code(user.email, user.verification_code, locale=locale)
+    except Exception:
+        await session.rollback()
+        persisted_user = await session.get(User, user.id)
+        if persisted_user is not None and not persisted_user.is_verified:
+            await session.delete(persisted_user)
+            await session.commit()
+        raise
 
 
 async def verify_user(email: str, code: str, session: AsyncSession) -> TokenResponse:

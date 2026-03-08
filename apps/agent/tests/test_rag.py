@@ -31,7 +31,7 @@ AGENT_KWARGS = {
 
 
 def _test_database_url() -> str:
-    return default_test_database_url(os.environ)
+    return default_test_database_url(os.environ, scope="agent_rag")
 
 
 class FakeEmbeddingClient:

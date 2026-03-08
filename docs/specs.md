@@ -213,7 +213,7 @@ Key components:
 
 | Package | Minimum Version | Purpose |
 |---|---|---|
-| vitest | 3.2+ | Testing |
+| vitest | 4.0.18+ | Testing |
 | @testing-library/react | 16.3+ | React component testing |
 | eslint | 9.22+ | Linting (flat config) |
 | prettier | 3.5+ | Formatting |

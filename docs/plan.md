@@ -67,16 +67,16 @@
 - [x] **S20. Interruption handling**
       Interruption handling: upon detecting speech during the agent's response — immediate cancellation of current LLM + TTS generation, switching to receiving new input. Handling false interruptions: if no words are recognized after an interruption — regenerate a brief continuation or repeat the last 1-2 sentences. Configurable timeouts.
 
-- [ ] **S21. PWA: authentication screens**
+- [x] **S21. PWA: authentication screens**
       React application in `apps/web/`: registration pages (email + password), verification (entering a 6-digit code), login. React Router for routing. TanStack Query for requests to FastAPI. JWT token storage, automatic refresh on 401. Redirect to login on refresh token expiration. Basic application layout.
 
-- [ ] **S22. PWA: main chat interface**
+- [x] **S22. PWA: main chat interface**
       Connecting to LiveKit via Client SDK. Unified voice and text chat interface. Microphone control (AgentControlBar). Chat feed with transcripts (AgentChatTranscript). Audio visualization. Agent state indicator. Text input field. Switching between voice and text modes. Displaying interim transcripts in real time.
 
-- [ ] **S23. PWA: source attribution and history**
+- [x] **S23. PWA: source attribution and history**
       Rendering source indicator icons (book, video, podcast, article) next to bullet points in the text chat. Popup with detailed information on click (request to `GET /sources/{ids}`). Session history screen (request to `GET /sessions/history`). Viewing past dialogues (`GET /sessions/{id}/messages`).
 
-- [ ] **S24. PWA as Progressive Web App**
+- [x] **S24. PWA as Progressive Web App**
       Service worker for offline shell. Web App Manifest (icons, theme, standalone display). Meta tags for mobile. Responsive layout for mobile and desktop browsers. Vite build optimization for production.
 
 - [ ] **S25. Integration testing and stabilization**

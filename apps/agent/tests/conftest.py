@@ -18,7 +18,7 @@ def livekit_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LIVEKIT_API_KEY", "api-key-for-tests")
     monkeypatch.setenv("LIVEKIT_API_SECRET", "api-secret-for-tests-with-32-bytes")
     monkeypatch.setenv("DEEPGRAM_API_KEY", "dg_test_key")
-    monkeypatch.setenv("DATABASE_URL", default_test_database_url())
+    monkeypatch.setenv("DATABASE_URL", default_test_database_url(scope="agent"))
     monkeypatch.setenv("GOOGLE_API_KEY", "google_test_key")
 
     monkeypatch.setenv("LITELLM_URL", "http://litellm:4000")

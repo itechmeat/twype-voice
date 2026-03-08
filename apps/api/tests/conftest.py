@@ -22,7 +22,7 @@ from testsupport import (
     ensure_pgvector_extension,
 )
 
-TEST_DATABASE_URL = default_test_database_url(os.environ)
+TEST_DATABASE_URL = default_test_database_url(os.environ, scope="api")
 
 
 @pytest.fixture

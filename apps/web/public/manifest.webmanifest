@@ -1,0 +1,41 @@
+{
+  "name": "Twype",
+  "short_name": "Twype",
+  "description": "Installable voice and text workspace for expert AI conversations.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "lang": "en",
+  "theme_color": "#eef7ff",
+  "background_color": "#f6f1eb",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-maskable-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/apple-touch-icon-180x180.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
